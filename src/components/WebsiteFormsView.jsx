@@ -40,6 +40,7 @@ export default function WebsiteFormsView({ currentUser }) {
   const [selectedScriptForm, setSelectedScriptForm] = useState(null);
   const [scriptTab, setScriptTab] = useState('passive'); // 'passive' | 'server' | 'abandonment' | 'curl'
   const [scriptCopied, setScriptCopied] = useState(false);
+  const [formIdCopied, setFormIdCopied] = useState(false);
   const [isTestingLead, setIsTestingLead] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
@@ -176,8 +177,91 @@ export default function WebsiteFormsView({ currentUser }) {
     }
   };
 
-  const getPassiveScript = (formId) => {
+  const getPlainSnippet = (formId) => {
     const endpoint = `${supabaseUrl}/functions/v1/website-webhook?form_id=${formId}`;
+    if (scriptTab === 'server') {
+      return `// Server-Side Webhook (e.g. Next.js API route, Server Action, Express, or Checkout handler)
+// 100% Ad-blocker immune & runs asynchronously before payment gateway opens
+
+async function forwardLeadToCrm(customerData, utmParams = {}) {
+  const endpoint = '${endpoint}';
+
+  try {
+    await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        site_domain: 'yourwebsite.com',
+        name: customerData.name || customerData.fullName,
+        email: customerData.email,
+        phone: customerData.phone,
+        city: customerData.city || '',
+        notes: customerData.notes || 'Checkout initiated',
+        utm_source: utmParams.utm_source || utmParams.source || '',
+        utm_medium: utmParams.utm_medium || utmParams.medium || '',
+        utm_campaign: utmParams.utm_campaign || utmParams.campaign || '',
+        updates_consent: customerData.whatsappConsent || false
+      })
+    });
+  } catch (err) {
+    // Non-blocking: never fail customer checkout if CRM forward has a network delay
+    console.warn('[simplecrm] Lead forward notice:', err);
+  }
+}`;
+    }
+
+    if (scriptTab === 'abandonment') {
+      return `<!-- simplecrm Pre-Payment / Drop-off Capture -->
+<!-- Captures contact info the instant visitor enters email or phone and moves to the next field -->
+<script>
+(function() {
+  var crmEndpoint = '${endpoint}';
+  var captured = false;
+
+  document.addEventListener('change', function(e) {
+    if (captured) return;
+    var el = e.target;
+    if (!el || (el.type !== 'email' && el.name !== 'email' && el.name !== 'phone' && el.type !== 'tel')) return;
+
+    var form = el.closest('form');
+    if (!form) return;
+
+    try {
+      var data = Object.fromEntries(new FormData(form).entries());
+      if (data.email || data.phone) {
+        data.site_domain = window.location.hostname;
+        data.notes = 'Pre-payment lead (captured on input)';
+
+        var params = new URLSearchParams(window.location.search);
+        ['utm_source', 'utm_medium', 'utm_campaign'].forEach(function(k) {
+          if (params.get(k)) data[k] = params.get(k);
+        });
+
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(crmEndpoint, new Blob([JSON.stringify(data)], { type: 'application/json' }));
+          captured = true;
+        }
+      }
+    } catch (err) {}
+  }, true);
+})();
+</script>`;
+    }
+
+    if (scriptTab === 'curl') {
+      return `curl -X POST "${endpoint}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "site_domain": "yourwebsite.com",
+    "name": "Alex Johnson",
+    "email": "alex@example.com",
+    "phone": "+91 9876543210",
+    "city": "Mumbai",
+    "utm_source": "meta_ads",
+    "utm_campaign": "march_growth"
+  }'`;
+    }
+
     return `<!-- simplecrm Universal Form Interceptor -->
 <!-- Safe for all checkout, payment, Webflow, and custom HTML forms -->
 <script>
@@ -221,102 +305,9 @@ export default function WebsiteFormsView({ currentUser }) {
 </script>`;
   };
 
-  const getServerScript = (formId) => {
-    const endpoint = `${supabaseUrl}/functions/v1/website-webhook?form_id=${formId}`;
-    return `// Server-Side Webhook (e.g. Next.js API route, Server Action, Express, or Checkout handler)
-// 100% Ad-blocker immune & runs asynchronously before payment gateway opens
-
-async function forwardLeadToCrm(customerData, utmParams = {}) {
-  const endpoint = '${endpoint}';
-
-  try {
-    await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        site_domain: 'yourwebsite.com',
-        name: customerData.name || customerData.fullName,
-        email: customerData.email,
-        phone: customerData.phone,
-        city: customerData.city || '',
-        notes: customerData.notes || 'Checkout initiated',
-        utm_source: utmParams.utm_source || utmParams.source || '',
-        utm_medium: utmParams.utm_medium || utmParams.medium || '',
-        utm_campaign: utmParams.utm_campaign || utmParams.campaign || '',
-        updates_consent: customerData.whatsappConsent || false
-      })
-    });
-  } catch (err) {
-    // Non-blocking: never fail customer checkout if CRM forward has a network delay
-    console.warn('[simplecrm] Lead forward notice:', err);
-  }
-}`;
-  };
-
-  const getAbandonmentScript = (formId) => {
-    const endpoint = `${supabaseUrl}/functions/v1/website-webhook?form_id=${formId}`;
-    return `<!-- simplecrm Pre-Payment / Drop-off Capture -->
-<!-- Captures contact info the instant visitor enters email or phone and moves to the next field -->
-<script>
-(function() {
-  var crmEndpoint = '${endpoint}';
-  var captured = false;
-
-  document.addEventListener('change', function(e) {
-    if (captured) return;
-    var el = e.target;
-    if (!el || (el.type !== 'email' && el.name !== 'email' && el.name !== 'phone' && el.type !== 'tel')) return;
-
-    var form = el.closest('form');
-    if (!form) return;
-
-    try {
-      var data = Object.fromEntries(new FormData(form).entries());
-      if (data.email || data.phone) {
-        data.site_domain = window.location.hostname;
-        data.notes = 'Pre-payment lead (captured on input)';
-
-        var params = new URLSearchParams(window.location.search);
-        ['utm_source', 'utm_medium', 'utm_campaign'].forEach(function(k) {
-          if (params.get(k)) data[k] = params.get(k);
-        });
-
-        if (navigator.sendBeacon) {
-          navigator.sendBeacon(crmEndpoint, new Blob([JSON.stringify(data)], { type: 'application/json' }));
-          captured = true;
-        }
-      }
-    } catch (err) {}
-  }, true);
-})();
-</script>`;
-  };
-
-  const getCurlScript = (formId) => {
-    const endpoint = `${supabaseUrl}/functions/v1/website-webhook?form_id=${formId}`;
-    return `curl -X POST "${endpoint}" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "site_domain": "yourwebsite.com",
-    "name": "Alex Johnson",
-    "email": "alex@example.com",
-    "phone": "+91 9876543210",
-    "city": "Mumbai",
-    "utm_source": "meta_ads",
-    "utm_campaign": "march_growth"
-  }'`;
-  };
-
-  const getActiveCode = (formId) => {
-    if (scriptTab === 'server') return getServerScript(formId);
-    if (scriptTab === 'abandonment') return getAbandonmentScript(formId);
-    if (scriptTab === 'curl') return getCurlScript(formId);
-    return getPassiveScript(formId);
-  };
-
   const handleCopyScript = () => {
     if (!selectedScriptForm) return;
-    const script = getActiveCode(selectedScriptForm.form_id);
+    const script = getPlainSnippet(selectedScriptForm.form_id);
     navigator.clipboard.writeText(script);
     setScriptCopied(true);
     setTimeout(() => setScriptCopied(false), 2000);
@@ -419,6 +410,11 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
     );
   }
 
+  const selectedPipeline = pipelines.find((p) => p.id === selectedScriptForm?.pipeline_id);
+  const currentEndpoint = selectedScriptForm
+    ? `${supabaseUrl}/functions/v1/website-webhook?form_id=${selectedScriptForm.form_id}`
+    : '';
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%' }}>
       {/* SECTION 1: HERO STATUS CARD */}
@@ -445,6 +441,7 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
               onClick={() => {
                 if (forms.length > 0) {
                   setSelectedScriptForm(forms[0]);
+                  setScriptTab('passive');
                   setScriptCopied(false);
                   setTestResult(null);
                 } else {
@@ -513,8 +510,6 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
         ) : (
           <div className="meta-forms-table">
             {forms.map((form) => {
-              const currentPipeline = pipelines.find((p) => p.id === form.pipeline_id);
-
               return (
                 <div key={form.id || form.form_id} className="meta-form-row-item">
                   <div className="meta-form-identity">
@@ -594,6 +589,7 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
                         setSelectedScriptForm(form);
                         setScriptTab('passive');
                         setScriptCopied(false);
+                        setFormIdCopied(false);
                         setTestResult(null);
                       }}
                       title="Get integration code & webhook specs"
@@ -704,13 +700,50 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
       {/* Integration Code Modal */}
       {selectedScriptForm && createPortal(
         <div className="meta-modal-backdrop" onClick={() => setSelectedScriptForm(null)}>
-          <div className="meta-modal" style={{ maxWidth: '720px' }} onClick={(e) => e.stopPropagation()}>
-            <div className="meta-modal-header">
+          <div className="meta-modal" style={{ maxWidth: '700px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="meta-modal-header" style={{ padding: '18px 22px 14px' }}>
               <div>
-                <h3 className="meta-modal-title">Website Form Integration Hub</h3>
-                <p className="meta-modal-subtitle" style={{ marginTop: '2px', fontSize: '12px', color: '#64748b' }}>
-                  {selectedScriptForm.form_name} &middot; <code style={{ fontSize: '11px' }}>{selectedScriptForm.form_id}</code>
-                </p>
+                <h3 className="meta-modal-title" style={{ fontSize: '16px' }}>
+                  Website Form Integration Hub
+                </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '12.5px', color: '#475569', fontWeight: 500 }}>
+                    {selectedScriptForm.form_name}
+                  </span>
+                  <span style={{ color: '#cbd5e1' }}>&middot;</span>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      background: '#f1f5f9',
+                      padding: '2px 7px',
+                      borderRadius: '5px',
+                      fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+                      fontSize: '11px',
+                      color: '#334155',
+                      cursor: 'pointer'
+                    }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(selectedScriptForm.form_id);
+                      setFormIdCopied(true);
+                      setTimeout(() => setFormIdCopied(false), 1500);
+                    }}
+                    title="Click to copy Form ID"
+                  >
+                    <code>{selectedScriptForm.form_id}</code>
+                    {formIdCopied ? <Check size={11} color="#16a34a" /> : <Copy size={11} color="#94a3b8" />}
+                  </span>
+                  {selectedPipeline && (
+                    <>
+                      <span style={{ color: '#cbd5e1' }}>&middot;</span>
+                      <span className="wf-pipe-badge">
+                        <GitBranch size={11} color="#64748b" />
+                        <span>{selectedPipeline.name}</span>
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
               <button
                 type="button"
@@ -722,21 +755,34 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
               </button>
             </div>
 
-            <div className="meta-modal-body" style={{ padding: '20px' }}>
-              {/* Simulator & Ingestion Test Banner */}
-              <div className={`wf-test-banner ${testResult ? (testResult.success ? 'success' : 'error') : ''}`}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <ShieldCheck size={16} color={testResult?.success ? '#16a34a' : '#64748b'} />
-                  <span>
-                    {testResult ? testResult.message : 'Verify your webhook endpoint by sending a test lead payload.'}
-                  </span>
+            <div className="meta-modal-body" style={{ padding: '18px 22px' }}>
+              {/* Simulator & Ingestion Test Card */}
+              <div className={`wf-test-card ${testResult ? (testResult.success ? 'success' : 'error') : ''}`}>
+                <div className="wf-test-card-left">
+                  <div className={`wf-test-icon-tile ${testResult ? (testResult.success ? 'success' : 'error') : ''}`}>
+                    {testResult?.success ? (
+                      <Check size={16} />
+                    ) : testResult ? (
+                      <AlertCircle size={16} />
+                    ) : (
+                      <Zap size={16} />
+                    )}
+                  </div>
+                  <div>
+                    <div className="wf-test-title">
+                      {testResult ? (testResult.success ? 'Webhook Ingestion Active' : 'Ingestion Error') : 'Live Endpoint Simulator'}
+                    </div>
+                    <div className="wf-test-desc">
+                      {testResult ? testResult.message : 'Send a simulated lead payload directly into your pipeline to verify connectivity.'}
+                    </div>
+                  </div>
                 </div>
                 <button
                   type="button"
                   className="btn-meta-clean"
                   onClick={() => handleSendTestLead(selectedScriptForm)}
                   disabled={isTestingLead}
-                  style={{ height: '28px', padding: '0 10px', fontSize: '11.5px', gap: '5px' }}
+                  style={{ height: '32px', padding: '0 12px', fontSize: '12px', gap: '6px', flexShrink: 0 }}
                 >
                   <Send size={12} />
                   <span>{isTestingLead ? 'Sending...' : 'Send Test Lead'}</span>
@@ -751,7 +797,7 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
                   onClick={() => setScriptTab('passive')}
                 >
                   <Globe size={13} />
-                  <span>Passive Script (HTML/Webflow)</span>
+                  <span>Passive HTML Script</span>
                 </button>
                 <button
                   type="button"
@@ -759,7 +805,7 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
                   onClick={() => setScriptTab('server')}
                 >
                   <Server size={13} />
-                  <span>Server-Side (React / Checkout)</span>
+                  <span>Server-Side Webhook</span>
                 </button>
                 <button
                   type="button"
@@ -775,33 +821,45 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
                   onClick={() => setScriptTab('curl')}
                 >
                   <Terminal size={13} />
-                  <span>cURL</span>
+                  <span>cURL / API</span>
                 </button>
               </div>
 
-              {/* Tab Explanations */}
+              {/* Tab Explanations with Badges */}
               {scriptTab === 'passive' && (
-                <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
-                  <strong>Zero-Interruption Interceptor:</strong> Paste this into your site header or footer before <code className="meta-code-inline">&lt;/body&gt;</code>. It silently captures all submissions and UTM tags using <code className="meta-code-inline">sendBeacon</code> without stopping form redirects or payment.
-                </p>
+                <div className="wf-feature-callout">
+                  <span className="wf-feature-pill green">Zero Disruption</span>
+                  <p className="wf-feature-text">
+                    Paste in your site header or footer before <code>&lt;/body&gt;</code>. Transparently captures submissions and UTM tags using <code>sendBeacon</code> without stopping form redirects or payment.
+                  </p>
+                </div>
               )}
               {scriptTab === 'server' && (
-                <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
-                  <strong>100% Ad-Blocker Proof:</strong> Call this from your backend server function (e.g. Next.js, Node.js, Python, or enrollment checkout handler) before opening payment. Guarantees lead capture even if visitors use Brave or uBlock.
-                </p>
+                <div className="wf-feature-callout">
+                  <span className="wf-feature-pill blue">100% Ad-Blocker Immune</span>
+                  <p className="wf-feature-text">
+                    Call asynchronously from your backend server function (Next.js, Node.js, Python, or checkout handler) before opening payment. Guarantees 100% delivery even with Brave or uBlock.
+                  </p>
+                </div>
               )}
               {scriptTab === 'abandonment' && (
-                <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
-                  <strong>Pre-Payment Abandonment Capture:</strong> Listens for <code className="meta-code-inline">change</code> events on email and phone fields. If a visitor types their contact info and drops off without completing payment, your CRM still receives their lead.
-                </p>
+                <div className="wf-feature-callout">
+                  <span className="wf-feature-pill amber">Pre-Payment Capture</span>
+                  <p className="wf-feature-text">
+                    Captures leads on <code>change</code>/<code>blur</code> the moment a visitor finishes typing their email or phone, ensuring you capture them even if they abandon before paying.
+                  </p>
+                </div>
               )}
               {scriptTab === 'curl' && (
-                <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
-                  <strong>Direct HTTP Testing:</strong> Use this cURL command in your terminal to test webhook ingestion and custom field mapping.
-                </p>
+                <div className="wf-feature-callout">
+                  <span className="wf-feature-pill purple">Direct HTTP API</span>
+                  <p className="wf-feature-text">
+                    Standard JSON webhook endpoint. Compatible with custom backend scripts, Zapier, Webflow Logic, or direct terminal verification.
+                  </p>
+                </div>
               )}
 
-              {/* Code Box */}
+              {/* Code Box with Syntax Highlighting & Dual-Axis Scrolling */}
               <div className="meta-script-preview-box">
                 <div className="meta-script-preview-bar">
                   <div className="meta-script-dots">
@@ -817,7 +875,7 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
                   </div>
                   <button
                     type="button"
-                    className="meta-script-copy-btn"
+                    className={`meta-script-copy-btn ${scriptCopied ? 'copied' : ''}`}
                     onClick={handleCopyScript}
                   >
                     {scriptCopied ? (
@@ -835,28 +893,179 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
                 </div>
 
                 <div className="meta-script-code-wrap">
-                  <pre className="meta-script-code">
-                    {getActiveCode(selectedScriptForm.form_id)}
-                  </pre>
+                  {scriptTab === 'passive' && (
+                    <pre className="meta-script-code">
+                      <span className="syn-punct">&lt;!-- simplecrm Universal Form Interceptor --&gt;</span>{'\n'}
+                      <span className="syn-punct">&lt;!-- Safe for all checkout, payment, Webflow, and custom HTML forms --&gt;</span>{'\n'}
+                      <span className="syn-tag">&lt;script&gt;</span>{'\n'}
+                      (<span className="syn-kw">function</span>() &#123;{'\n'}
+                      {'  '}<span className="syn-kw">var</span> <span className="syn-var">crmEndpoint</span> = <span className="syn-str">'{currentEndpoint}'</span>;{'\n'}
+                      {'\n'}
+                      {'  '}<span className="syn-punct">// Passive interceptor: captures data silently without stopping submit, redirects, or checkout</span>{'\n'}
+                      {'  '}<span className="syn-obj">document</span>.<span className="syn-fn">addEventListener</span>(<span className="syn-str">'submit'</span>, <span className="syn-kw">function</span>(e) &#123;{'\n'}
+                      {'    '}<span className="syn-kw">var</span> <span className="syn-var">form</span> = e.<span className="syn-prop">target</span>;{'\n'}
+                      {'    '}<span className="syn-kw">if</span> (!<span className="syn-var">form</span> || <span className="syn-var">form</span>.<span className="syn-prop">nodeName</span> !== <span className="syn-str">'FORM'</span>) <span className="syn-kw">return</span>;{'\n'}
+                      {'\n'}
+                      {'    '}<span className="syn-kw">try</span> &#123;{'\n'}
+                      {'      '}<span className="syn-kw">var</span> <span className="syn-var">formData</span> = <span className="syn-kw">new</span> <span className="syn-obj">FormData</span>(<span className="syn-var">form</span>);{'\n'}
+                      {'      '}<span className="syn-kw">var</span> <span className="syn-var">data</span> = <span className="syn-obj">Object</span>.<span className="syn-fn">fromEntries</span>(<span className="syn-var">formData</span>.<span className="syn-fn">entries</span>());{'\n'}
+                      {'\n'}
+                      {'      '}<span className="syn-var">data</span>.<span className="syn-prop">site_domain</span> = <span className="syn-obj">window</span>.<span className="syn-prop">location</span>.<span className="syn-prop">hostname</span>;{'\n'}
+                      {'      '}<span className="syn-var">data</span>.<span className="syn-prop">page_url</span> = <span className="syn-obj">window</span>.<span className="syn-prop">location</span>.<span className="syn-prop">href</span>;{'\n'}
+                      {'\n'}
+                      {'      '}<span className="syn-punct">// Automatically capture UTM parameters from URL for ad attribution</span>{'\n'}
+                      {'      '}<span className="syn-kw">var</span> <span className="syn-var">params</span> = <span className="syn-kw">new</span> <span className="syn-obj">URLSearchParams</span>(<span className="syn-obj">window</span>.<span className="syn-prop">location</span>.<span className="syn-prop">search</span>);{'\n'}
+                      {'      '}[<span className="syn-str">'utm_source'</span>, <span className="syn-str">'utm_medium'</span>, <span className="syn-str">'utm_campaign'</span>, <span className="syn-str">'utm_term'</span>, <span className="syn-str">'utm_content'</span>].<span className="syn-fn">forEach</span>(<span className="syn-kw">function</span>(k) &#123;{'\n'}
+                      {'        '}<span className="syn-kw">if</span> (<span className="syn-var">params</span>.<span className="syn-fn">get</span>(k)) <span className="syn-var">data</span>[k] = <span className="syn-var">params</span>.<span className="syn-fn">get</span>(k);{'\n'}
+                      {'      '}&#125;);{'\n'}
+                      {'\n'}
+                      {'      '}<span className="syn-kw">var</span> <span className="syn-var">jsonPayload</span> = <span className="syn-obj">JSON</span>.<span className="syn-fn">stringify</span>(<span className="syn-var">data</span>);{'\n'}
+                      {'\n'}
+                      {'      '}<span className="syn-punct">// Transmit silently using keepalive/sendBeacon (guarantees delivery across payment redirects)</span>{'\n'}
+                      {'      '}<span className="syn-kw">if</span> (<span className="syn-obj">navigator</span>.<span className="syn-prop">sendBeacon</span>) &#123;{'\n'}
+                      {'        '}<span className="syn-obj">navigator</span>.<span className="syn-fn">sendBeacon</span>(<span className="syn-var">crmEndpoint</span>, <span className="syn-kw">new</span> <span className="syn-obj">Blob</span>([<span className="syn-var">jsonPayload</span>], &#123; <span className="syn-prop">type</span>: <span className="syn-str">'application/json'</span> &#125;));{'\n'}
+                      {'      '}&#125; <span className="syn-kw">else</span> &#123;{'\n'}
+                      {'        '}<span className="syn-fn">fetch</span>(<span className="syn-var">crmEndpoint</span>, &#123;{'\n'}
+                      {'          '}<span className="syn-prop">method</span>: <span className="syn-str">'POST'</span>,{'\n'}
+                      {'          '}<span className="syn-prop">headers</span>: &#123; <span className="syn-str">'Content-Type'</span>: <span className="syn-str">'application/json'</span> &#125;,{'\n'}
+                      {'          '}<span className="syn-prop">body</span>: <span className="syn-var">jsonPayload</span>,{'\n'}
+                      {'          '}<span className="syn-prop">keepalive</span>: <span className="syn-kw">true</span>{'\n'}
+                      {'        '}&#125;).<span className="syn-fn">catch</span>(<span className="syn-kw">function</span>() &#123;&#125;);{'\n'}
+                      {'      '}&#125;{'\n'}
+                      {'    '}&#125; <span className="syn-kw">catch</span> (err) &#123;&#125;{'\n'}
+                      {'  '}&#125;, <span className="syn-kw">true</span>);{'\n'}
+                      &#125;)();{'\n'}
+                      <span className="syn-tag">&lt;/script&gt;</span>
+                    </pre>
+                  )}
+
+                  {scriptTab === 'server' && (
+                    <pre className="meta-script-code">
+                      <span className="syn-punct">// Server-Side Webhook (e.g. Next.js API route, Server Action, Express, or Checkout handler)</span>{'\n'}
+                      <span className="syn-punct">// 100% Ad-blocker immune &amp; runs asynchronously before payment gateway opens</span>{'\n'}
+                      {'\n'}
+                      <span className="syn-kw">async function</span> <span className="syn-fn">forwardLeadToCrm</span>(<span className="syn-var">customerData</span>, <span className="syn-var">utmParams</span> = &#123;&#125;) &#123;{'\n'}
+                      {'  '}<span className="syn-kw">const</span> <span className="syn-var">endpoint</span> = <span className="syn-str">'{currentEndpoint}'</span>;{'\n'}
+                      {'\n'}
+                      {'  '}<span className="syn-kw">try</span> &#123;{'\n'}
+                      {'    '}<span className="syn-kw">await</span> <span className="syn-fn">fetch</span>(<span className="syn-var">endpoint</span>, &#123;{'\n'}
+                      {'      '}<span className="syn-prop">method</span>: <span className="syn-str">'POST'</span>,{'\n'}
+                      {'      '}<span className="syn-prop">headers</span>: &#123; <span className="syn-str">'Content-Type'</span>: <span className="syn-str">'application/json'</span> &#125;,{'\n'}
+                      {'      '}<span className="syn-prop">body</span>: <span className="syn-obj">JSON</span>.<span className="syn-fn">stringify</span>(&#123;{'\n'}
+                      {'        '}<span className="syn-prop">site_domain</span>: <span className="syn-str">'yourwebsite.com'</span>,{'\n'}
+                      {'        '}<span className="syn-prop">name</span>: <span className="syn-var">customerData</span>.<span className="syn-prop">name</span> || <span className="syn-var">customerData</span>.<span className="syn-prop">fullName</span>,{'\n'}
+                      {'        '}<span className="syn-prop">email</span>: <span className="syn-var">customerData</span>.<span className="syn-prop">email</span>,{'\n'}
+                      {'        '}<span className="syn-prop">phone</span>: <span className="syn-var">customerData</span>.<span className="syn-prop">phone</span>,{'\n'}
+                      {'        '}<span className="syn-prop">city</span>: <span className="syn-var">customerData</span>.<span className="syn-prop">city</span> || <span className="syn-str">''</span>,{'\n'}
+                      {'        '}<span className="syn-prop">notes</span>: <span className="syn-var">customerData</span>.<span className="syn-prop">notes</span> || <span className="syn-str">'Checkout initiated'</span>,{'\n'}
+                      {'        '}<span className="syn-prop">utm_source</span>: <span className="syn-var">utmParams</span>.<span className="syn-prop">utm_source</span> || <span className="syn-var">utmParams</span>.<span className="syn-prop">source</span> || <span className="syn-str">''</span>,{'\n'}
+                      {'        '}<span className="syn-prop">utm_medium</span>: <span className="syn-var">utmParams</span>.<span className="syn-prop">utm_medium</span> || <span className="syn-var">utmParams</span>.<span className="syn-prop">medium</span> || <span className="syn-str">''</span>,{'\n'}
+                      {'        '}<span className="syn-prop">utm_campaign</span>: <span className="syn-var">utmParams</span>.<span className="syn-prop">utm_campaign</span> || <span className="syn-var">utmParams</span>.<span className="syn-prop">campaign</span> || <span className="syn-str">''</span>,{'\n'}
+                      {'        '}<span className="syn-prop">updates_consent</span>: <span className="syn-var">customerData</span>.<span className="syn-prop">whatsappConsent</span> || <span className="syn-kw">false</span>{'\n'}
+                      {'      '}&#125;){'\n'}
+                      {'    '}&#125;);{'\n'}
+                      {'  '}&#125; <span className="syn-kw">catch</span> (err) &#123;{'\n'}
+                      {'    '}<span className="syn-punct">// Non-blocking: never fail customer checkout if CRM has network delay</span>{'\n'}
+                      {'    '}<span className="syn-obj">console</span>.<span className="syn-fn">warn</span>(<span className="syn-str">'[simplecrm] Lead forward notice:'</span>, err);{'\n'}
+                      {'  '}&#125;{'\n'}
+                      &#125;
+                    </pre>
+                  )}
+
+                  {scriptTab === 'abandonment' && (
+                    <pre className="meta-script-code">
+                      <span className="syn-punct">&lt;!-- simplecrm Pre-Payment / Drop-off Capture --&gt;</span>{'\n'}
+                      <span className="syn-punct">&lt;!-- Captures contact info the instant visitor enters email or phone and moves to the next field --&gt;</span>{'\n'}
+                      <span className="syn-tag">&lt;script&gt;</span>{'\n'}
+                      (<span className="syn-kw">function</span>() &#123;{'\n'}
+                      {'  '}<span className="syn-kw">var</span> <span className="syn-var">crmEndpoint</span> = <span className="syn-str">'{currentEndpoint}'</span>;{'\n'}
+                      {'  '}<span className="syn-kw">var</span> <span className="syn-var">captured</span> = <span className="syn-kw">false</span>;{'\n'}
+                      {'\n'}
+                      {'  '}<span className="syn-obj">document</span>.<span className="syn-fn">addEventListener</span>(<span className="syn-str">'change'</span>, <span className="syn-kw">function</span>(e) &#123;{'\n'}
+                      {'    '}<span className="syn-kw">if</span> (<span className="syn-var">captured</span>) <span className="syn-kw">return</span>;{'\n'}
+                      {'    '}<span className="syn-kw">var</span> <span className="syn-var">el</span> = e.<span className="syn-prop">target</span>;{'\n'}
+                      {'    '}<span className="syn-kw">if</span> (!<span className="syn-var">el</span> || (<span className="syn-var">el</span>.<span className="syn-prop">type</span> !== <span className="syn-str">'email'</span> &amp;&amp; <span className="syn-var">el</span>.<span className="syn-prop">name</span> !== <span className="syn-str">'email'</span> &amp;&amp; <span className="syn-var">el</span>.<span className="syn-prop">name</span> !== <span className="syn-str">'phone'</span> &amp;&amp; <span className="syn-var">el</span>.<span className="syn-prop">type</span> !== <span className="syn-str">'tel'</span>)) <span className="syn-kw">return</span>;{'\n'}
+                      {'\n'}
+                      {'    '}<span className="syn-kw">var</span> <span className="syn-var">form</span> = <span className="syn-var">el</span>.<span className="syn-fn">closest</span>(<span className="syn-str">'form'</span>);{'\n'}
+                      {'    '}<span className="syn-kw">if</span> (!<span className="syn-var">form</span>) <span className="syn-kw">return</span>;{'\n'}
+                      {'\n'}
+                      {'    '}<span className="syn-kw">try</span> &#123;{'\n'}
+                      {'      '}<span className="syn-kw">var</span> <span className="syn-var">data</span> = <span className="syn-obj">Object</span>.<span className="syn-fn">fromEntries</span>(<span className="syn-kw">new</span> <span className="syn-obj">FormData</span>(<span className="syn-var">form</span>).<span className="syn-fn">entries</span>());{'\n'}
+                      {'      '}<span className="syn-kw">if</span> (<span className="syn-var">data</span>.<span className="syn-prop">email</span> || <span className="syn-var">data</span>.<span className="syn-prop">phone</span>) &#123;{'\n'}
+                      {'        '}<span className="syn-var">data</span>.<span className="syn-prop">site_domain</span> = <span className="syn-obj">window</span>.<span className="syn-prop">location</span>.<span className="syn-prop">hostname</span>;{'\n'}
+                      {'        '}<span className="syn-var">data</span>.<span className="syn-prop">notes</span> = <span className="syn-str">'Pre-payment lead (captured on input)'</span>;{'\n'}
+                      {'\n'}
+                      {'        '}<span className="syn-kw">var</span> <span className="syn-var">params</span> = <span className="syn-kw">new</span> <span className="syn-obj">URLSearchParams</span>(<span className="syn-obj">window</span>.<span className="syn-prop">location</span>.<span className="syn-prop">search</span>);{'\n'}
+                      {'        '}[<span className="syn-str">'utm_source'</span>, <span className="syn-str">'utm_medium'</span>, <span className="syn-str">'utm_campaign'</span>].<span className="syn-fn">forEach</span>(<span className="syn-kw">function</span>(k) &#123;{'\n'}
+                      {'          '}<span className="syn-kw">if</span> (<span className="syn-var">params</span>.<span className="syn-fn">get</span>(k)) <span className="syn-var">data</span>[k] = <span className="syn-var">params</span>.<span className="syn-fn">get</span>(k);{'\n'}
+                      {'        '}&#125;);{'\n'}
+                      {'\n'}
+                      {'        '}<span className="syn-kw">if</span> (<span className="syn-obj">navigator</span>.<span className="syn-prop">sendBeacon</span>) &#123;{'\n'}
+                      {'          '}<span className="syn-obj">navigator</span>.<span className="syn-fn">sendBeacon</span>(<span className="syn-var">crmEndpoint</span>, <span className="syn-kw">new</span> <span className="syn-obj">Blob</span>([<span className="syn-obj">JSON</span>.<span className="syn-fn">stringify</span>(<span className="syn-var">data</span>)], &#123; <span className="syn-prop">type</span>: <span className="syn-str">'application/json'</span> &#125;));{'\n'}
+                      {'          '}<span className="syn-var">captured</span> = <span className="syn-kw">true</span>;{'\n'}
+                      {'        '}&#125;{'\n'}
+                      {'      '}&#125;{'\n'}
+                      {'    '}&#125; <span className="syn-kw">catch</span> (err) &#123;&#125;{'\n'}
+                      {'  '}&#125;, <span className="syn-kw">true</span>);{'\n'}
+                      &#125;)();{'\n'}
+                      <span className="syn-tag">&lt;/script&gt;</span>
+                    </pre>
+                  )}
+
+                  {scriptTab === 'curl' && (
+                    <pre className="meta-script-code">
+                      <span className="syn-fn">curl</span> -X POST <span className="syn-str">"{currentEndpoint}"</span> \{'\n'}
+                      {'  '}-H <span className="syn-str">"Content-Type: application/json"</span> \{'\n'}
+                      {'  '}-d <span className="syn-str">'&#123;{'\n'}
+                      {'    '}"site_domain": "yourwebsite.com",{'\n'}
+                      {'    '}"name": "Alex Johnson",{'\n'}
+                      {'    '}"email": "alex@example.com",{'\n'}
+                      {'    '}"phone": "+91 9876543210",{'\n'}
+                      {'    '}"city": "Mumbai",{'\n'}
+                      {'    '}"utm_source": "meta_ads",{'\n'}
+                      {'    '}"utm_campaign": "march_growth"{'\n'}
+                      {'  '}&#125;'</span>
+                    </pre>
+                  )}
                 </div>
               </div>
             </div>
 
-            <div className="meta-modal-footer">
-              <button
-                type="button"
-                className="btn-meta-clean"
-                onClick={() => setSelectedScriptForm(null)}
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                className="btn-meta-primary"
-                onClick={handleCopyScript}
-              >
-                {scriptCopied ? 'Copied to Clipboard' : 'Copy Code'}
-              </button>
+            <div className="meta-modal-footer" style={{ padding: '14px 22px', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                {selectedPipeline && (
+                  <span style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <GitBranch size={13} color="#94a3b8" />
+                    <span>Routing to <strong>{selectedPipeline.name}</strong></span>
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="meta-modal-btn-cancel"
+                  onClick={() => setSelectedScriptForm(null)}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className={`btn-meta-primary ${scriptCopied ? 'is-copied' : ''}`}
+                  onClick={handleCopyScript}
+                >
+                  {scriptCopied ? (
+                    <>
+                      <Check size={14} color="#ffffff" />
+                      <span>Copied to Clipboard</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={14} color="#ffffff" />
+                      <span>Copy Code</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>,
@@ -867,9 +1076,12 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
       {isModalOpen && createPortal(
         <div className="meta-modal-backdrop" onClick={() => !isCreating && setIsModalOpen(false)}>
           <div className="meta-modal" style={{ maxWidth: '440px' }} onClick={(e) => e.stopPropagation()}>
-            <div className="meta-modal-header">
+            <div className="meta-modal-header" style={{ padding: '18px 22px 14px' }}>
               <div>
-                <h3 className="meta-modal-title">New Website Form</h3>
+                <h3 className="meta-modal-title" style={{ fontSize: '16px' }}>New Website Form</h3>
+                <p className="meta-modal-subtitle" style={{ fontSize: '12px', marginTop: '2px', color: '#64748b' }}>
+                  Create an endpoint to capture leads into a designated pipeline.
+                </p>
               </div>
               <button
                 type="button"
@@ -882,7 +1094,7 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
             </div>
 
             <form onSubmit={handleCreateForm}>
-              <div className="meta-modal-body" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div className="meta-modal-body" style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
                     Form Name
@@ -942,10 +1154,10 @@ async function forwardLeadToCrm(customerData, utmParams = {}) {
                 </div>
               </div>
 
-              <div className="meta-modal-footer">
+              <div className="meta-modal-footer" style={{ padding: '14px 22px' }}>
                 <button
                   type="button"
-                  className="btn-meta-clean"
+                  className="meta-modal-btn-cancel"
                   onClick={() => setIsModalOpen(false)}
                   disabled={isCreating}
                 >
