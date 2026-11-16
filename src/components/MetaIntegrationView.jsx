@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import EmailIntegrationView from './EmailIntegrationView';
 import WebsiteFormsView from './WebsiteFormsView';
+import WebsitePixelView from './WebsitePixelView';
 import { fetchEmailConfig } from '../lib/email';
 import { supabase } from '../lib/supabase';
 import { getActiveCompanyId, readTenantCache, writeTenantCache, removeTenantCache, readTenantString, writeTenantString } from '../lib/tenant';
@@ -196,6 +197,11 @@ const INTEGRATION_CHANNELS = [
     id: 'website',
     label: 'Website Forms',
     icon: <Globe size={20} strokeWidth={1.75} style={{ flexShrink: 0 }} />
+  },
+  {
+    id: 'pixel',
+    label: 'Website Pixel',
+    icon: <Activity size={20} strokeWidth={1.75} style={{ flexShrink: 0 }} />
   }
 ];
 
@@ -442,13 +448,14 @@ export default function MetaIntegrationView({ currentUser }) {
     }
   };
 
-  // Channel Tab State ('facebook' | 'whatsapp' | 'email' | 'website')
+  // Channel Tab State ('facebook' | 'whatsapp' | 'email' | 'website' | 'pixel')
   const [activeChannel, setActiveChannel] = useState('facebook');
   const [visitedChannels, setVisitedChannels] = useState(() => ({
     facebook: true,
     whatsapp: false,
     email: false,
-    website: false
+    website: false,
+    pixel: false
   }));
 
   useEffect(() => {
@@ -1773,6 +1780,16 @@ export default function MetaIntegrationView({ currentUser }) {
       iconBorder: '#c7d2fe',
       isConnected: isWebsiteActive,
       statusLabel: isWebsiteActive ? `${websiteFormsCount} Active` : 'Not Set'
+    },
+    {
+      id: 'pixel',
+      name: 'Website Pixel',
+      sub: 'Real-time activity monitor',
+      icon: <Activity size={18} style={{ color: '#0f172a' }} />,
+      iconBg: '#f8fafc',
+      iconBorder: '#cbd5e1',
+      isConnected: true,
+      statusLabel: 'Active'
     }
   ];
 
@@ -2707,6 +2724,13 @@ export default function MetaIntegrationView({ currentUser }) {
         {visitedChannels.website && (
           <div style={{ display: activeChannel === 'website' ? 'block' : 'none', width: '100%' }}>
             <WebsiteFormsView currentUser={currentUser} />
+          </div>
+        )}
+
+        {/* Website Pixel Channel Content (persisted once visited for instant switching) */}
+        {visitedChannels.pixel && (
+          <div style={{ display: activeChannel === 'pixel' ? 'block' : 'none', width: '100%' }}>
+            <WebsitePixelView currentUser={currentUser} />
           </div>
         )}
 
