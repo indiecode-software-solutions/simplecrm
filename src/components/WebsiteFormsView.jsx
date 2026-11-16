@@ -11,7 +11,16 @@ import {
   RefreshCw,
   HelpCircle,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Server,
+  Zap,
+  Send,
+  Terminal,
+  ShieldCheck,
+  AlertCircle,
+  GitBranch,
+  Layers,
+  Sparkles
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getActiveCompanyId } from '../lib/tenant';
@@ -26,9 +35,13 @@ export default function WebsiteFormsView({ currentUser }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [newFormName, setNewFormName] = useState('');
+  const [newFormPipelineId, setNewFormPipelineId] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [selectedScriptForm, setSelectedScriptForm] = useState(null);
+  const [scriptTab, setScriptTab] = useState('passive'); // 'passive' | 'server' | 'abandonment' | 'curl'
   const [scriptCopied, setScriptCopied] = useState(false);
+  const [isTestingLead, setIsTestingLead] = useState(false);
+  const [testResult, setTestResult] = useState(null);
 
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 
@@ -55,7 +68,12 @@ export default function WebsiteFormsView({ currentUser }) {
       ]);
 
       if (formsRes.data) setForms(formsRes.data);
-      if (pipesRes.data) setPipelines(pipesRes.data);
+      if (pipesRes.data) {
+        setPipelines(pipesRes.data);
+        if (pipesRes.data.length > 0 && !newFormPipelineId) {
+          setNewFormPipelineId(pipesRes.data[0].id);
+        }
+      }
     } catch (err) {
       console.warn('Error loading website forms:', err);
     } finally {
@@ -79,12 +97,14 @@ export default function WebsiteFormsView({ currentUser }) {
         throw new Error('No active workspace selected.');
       }
       const uniqueId = `wf_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36)}`;
+      const targetPipelineId = newFormPipelineId || (pipelines[0]?.id || null);
+
       const payload = {
         company_id: companyId,
         form_id: uniqueId,
         form_name: name,
         source: 'website',
-        pipeline_id: null,
+        pipeline_id: targetPipelineId,
         entry_stage_id: 'new',
         allocation_mode: 'inherit_global',
         is_active: true,
@@ -112,6 +132,28 @@ export default function WebsiteFormsView({ currentUser }) {
     }
   };
 
+  const handleUpdateFormPipeline = async (formId, pipelineId) => {
+    const companyId = getActiveCompanyId();
+    if (!companyId) return;
+    try {
+      await supabase
+        .from('connected_forms')
+        .update({
+          pipeline_id: pipelineId || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', formId)
+        .eq('company_id', companyId);
+
+      setForms((prev) =>
+        prev.map((f) => (f.id === formId ? { ...f, pipeline_id: pipelineId } : f))
+      );
+    } catch (err) {
+      console.error('Failed to update form pipeline:', err);
+      alert('Could not update pipeline: ' + (err.message || 'Unknown error'));
+    }
+  };
+
   const handleDeleteForm = async (form) => {
     if (!window.confirm(`Delete "${form.form_name}"? Existing leads will remain unchanged.`)) return;
 
@@ -134,44 +176,193 @@ export default function WebsiteFormsView({ currentUser }) {
     }
   };
 
-  const getUniversalScript = (formId) => {
+  const getPassiveScript = (formId) => {
     const endpoint = `${supabaseUrl}/functions/v1/website-webhook?form_id=${formId}`;
-    return `<script>
+    return `<!-- simplecrm Universal Form Interceptor -->
+<!-- Safe for all checkout, payment, Webflow, and custom HTML forms -->
+<script>
 (function() {
-  const endpoint = '${endpoint}';
+  var crmEndpoint = '${endpoint}';
 
-  // Verify connection on load
-  fetch(endpoint + '&ping=true', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ site_domain: window.location.hostname })
-  }).catch(function() {});
+  // Passive interceptor: captures data silently without stopping submit, redirects, or checkout
+  document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (!form || form.nodeName !== 'FORM') return;
 
-  // Form submission handler
-  document.getElementById('YOUR_FORM_ID').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    const data = Object.fromEntries(new FormData(this).entries());
-    data.site_domain = window.location.hostname;
+    try {
+      var formData = new FormData(form);
+      var data = Object.fromEntries(formData.entries());
 
-    await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
+      data.site_domain = window.location.hostname;
+      data.page_url = window.location.href;
 
-    alert('Thank you! Your inquiry has been received.');
-    this.reset();
-  });
+      // Automatically capture UTM parameters from URL for ad attribution
+      var params = new URLSearchParams(window.location.search);
+      ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'].forEach(function(k) {
+        if (params.get(k)) data[k] = params.get(k);
+      });
+
+      var jsonPayload = JSON.stringify(data);
+
+      // Transmit silently using keepalive/sendBeacon (guarantees delivery across payment redirects)
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(crmEndpoint, new Blob([jsonPayload], { type: 'application/json' }));
+      } else {
+        fetch(crmEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: jsonPayload,
+          keepalive: true
+        }).catch(function() {});
+      }
+    } catch (err) {}
+  }, true);
 })();
 </script>`;
   };
 
+  const getServerScript = (formId) => {
+    const endpoint = `${supabaseUrl}/functions/v1/website-webhook?form_id=${formId}`;
+    return `// Server-Side Webhook (e.g. Next.js API route, Server Action, Express, or Checkout handler)
+// 100% Ad-blocker immune & runs asynchronously before payment gateway opens
+
+async function forwardLeadToCrm(customerData, utmParams = {}) {
+  const endpoint = '${endpoint}';
+
+  try {
+    await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        site_domain: 'yourwebsite.com',
+        name: customerData.name || customerData.fullName,
+        email: customerData.email,
+        phone: customerData.phone,
+        city: customerData.city || '',
+        notes: customerData.notes || 'Checkout initiated',
+        utm_source: utmParams.utm_source || utmParams.source || '',
+        utm_medium: utmParams.utm_medium || utmParams.medium || '',
+        utm_campaign: utmParams.utm_campaign || utmParams.campaign || '',
+        updates_consent: customerData.whatsappConsent || false
+      })
+    });
+  } catch (err) {
+    // Non-blocking: never fail customer checkout if CRM forward has a network delay
+    console.warn('[simplecrm] Lead forward notice:', err);
+  }
+}`;
+  };
+
+  const getAbandonmentScript = (formId) => {
+    const endpoint = `${supabaseUrl}/functions/v1/website-webhook?form_id=${formId}`;
+    return `<!-- simplecrm Pre-Payment / Drop-off Capture -->
+<!-- Captures contact info the instant visitor enters email or phone and moves to the next field -->
+<script>
+(function() {
+  var crmEndpoint = '${endpoint}';
+  var captured = false;
+
+  document.addEventListener('change', function(e) {
+    if (captured) return;
+    var el = e.target;
+    if (!el || (el.type !== 'email' && el.name !== 'email' && el.name !== 'phone' && el.type !== 'tel')) return;
+
+    var form = el.closest('form');
+    if (!form) return;
+
+    try {
+      var data = Object.fromEntries(new FormData(form).entries());
+      if (data.email || data.phone) {
+        data.site_domain = window.location.hostname;
+        data.notes = 'Pre-payment lead (captured on input)';
+
+        var params = new URLSearchParams(window.location.search);
+        ['utm_source', 'utm_medium', 'utm_campaign'].forEach(function(k) {
+          if (params.get(k)) data[k] = params.get(k);
+        });
+
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(crmEndpoint, new Blob([JSON.stringify(data)], { type: 'application/json' }));
+          captured = true;
+        }
+      }
+    } catch (err) {}
+  }, true);
+})();
+</script>`;
+  };
+
+  const getCurlScript = (formId) => {
+    const endpoint = `${supabaseUrl}/functions/v1/website-webhook?form_id=${formId}`;
+    return `curl -X POST "${endpoint}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "site_domain": "yourwebsite.com",
+    "name": "Alex Johnson",
+    "email": "alex@example.com",
+    "phone": "+91 9876543210",
+    "city": "Mumbai",
+    "utm_source": "meta_ads",
+    "utm_campaign": "march_growth"
+  }'`;
+  };
+
+  const getActiveCode = (formId) => {
+    if (scriptTab === 'server') return getServerScript(formId);
+    if (scriptTab === 'abandonment') return getAbandonmentScript(formId);
+    if (scriptTab === 'curl') return getCurlScript(formId);
+    return getPassiveScript(formId);
+  };
+
   const handleCopyScript = () => {
     if (!selectedScriptForm) return;
-    const script = getUniversalScript(selectedScriptForm.form_id);
+    const script = getActiveCode(selectedScriptForm.form_id);
     navigator.clipboard.writeText(script);
     setScriptCopied(true);
     setTimeout(() => setScriptCopied(false), 2000);
+  };
+
+  const handleSendTestLead = async (form) => {
+    setIsTestingLead(true);
+    setTestResult(null);
+    try {
+      const endpoint = `${supabaseUrl}/functions/v1/website-webhook?form_id=${form.form_id}`;
+      const payload = {
+        name: 'Alex Johnson (Sample Lead)',
+        email: 'alex.sample@example.com',
+        phone: '+91 98765 43210',
+        city: 'Mumbai',
+        site_domain: window.location.hostname || 'simulator.local',
+        utm_source: 'dashboard_test',
+        utm_medium: 'crm_simulator',
+        utm_campaign: 'lead_verification',
+        notes: 'Verification test triggered from simplecrm Website Forms dashboard.'
+      };
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to send test lead');
+      }
+
+      setTestResult({
+        success: true,
+        message: `Success! Test lead created (${data.lead_id ? data.lead_id.substring(0, 8) : 'new'}). Verified pipeline ingestion.`
+      });
+      fetchData();
+    } catch (err) {
+      setTestResult({
+        success: false,
+        message: err.message || 'Error communicating with webhook endpoint'
+      });
+    } finally {
+      setIsTestingLead(false);
+    }
   };
 
   if (isLoading) {
@@ -224,17 +415,6 @@ export default function WebsiteFormsView({ currentUser }) {
             ))}
           </div>
         </div>
-
-        {/* Setup Guide Skeleton */}
-        <div className="meta-panel-card">
-          <div className="meta-panel-header">
-            <div className="meta-panel-header-left">
-              <Skeleton width="180px" height="18px" borderRadius="4px" />
-              <Skeleton width="55px" height="18px" borderRadius="10px" />
-            </div>
-            <Skeleton width="96px" height="30px" borderRadius="7px" />
-          </div>
-        </div>
       </div>
     );
   }
@@ -250,8 +430,11 @@ export default function WebsiteFormsView({ currentUser }) {
             </div>
             <div className="meta-account-details">
               <div className="meta-account-title-line">
-                <span className="meta-account-name">Universal Website Forms</span>
+                <span className="meta-account-name">Universal Website Forms & Webhooks</span>
               </div>
+              <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+                Capture leads from HTML forms, payment checkouts, React apps, and landing pages with zero disruption.
+              </p>
             </div>
           </div>
 
@@ -263,6 +446,7 @@ export default function WebsiteFormsView({ currentUser }) {
                 if (forms.length > 0) {
                   setSelectedScriptForm(forms[0]);
                   setScriptCopied(false);
+                  setTestResult(null);
                 } else {
                   setIsModalOpen(true);
                 }
@@ -270,7 +454,7 @@ export default function WebsiteFormsView({ currentUser }) {
               style={{ height: '34px', padding: '0 12px', fontSize: '13px', gap: '6px' }}
             >
               <Code size={14} />
-              <span>Get Embed Script</span>
+              <span>Get Integration Code</span>
             </button>
           </div>
         </div>
@@ -290,16 +474,21 @@ export default function WebsiteFormsView({ currentUser }) {
       <div className="meta-panel-card">
         <div className="meta-panel-header">
           <div className="meta-panel-header-left">
-            <span className="meta-panel-title">Connected Forms</span>
+            <span className="meta-panel-title">Connected Forms & Endpoints</span>
             <span className="meta-count-badge">
-              {forms.length} {forms.length === 1 ? 'form' : 'forms'} active
+              {forms.length} {forms.length === 1 ? 'form' : 'forms'} configured
             </span>
           </div>
 
           <button
             type="button"
             className="btn-meta-add-form"
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => {
+              if (pipelines.length > 0 && !newFormPipelineId) {
+                setNewFormPipelineId(pipelines[0].id);
+              }
+              setIsModalOpen(true);
+            }}
           >
             <Plus size={14} /> Add Form
           </button>
@@ -309,6 +498,9 @@ export default function WebsiteFormsView({ currentUser }) {
           <div className="meta-forms-empty-state">
             <Globe size={24} color="#94a3b8" />
             <p className="meta-empty-title">No website forms configured</p>
+            <p style={{ margin: '4px 0 10px 0', fontSize: '12px', color: '#64748b' }}>
+              Create an endpoint to capture leads from your landing pages, checkouts, or payment flows.
+            </p>
             <button
               type="button"
               className="btn-meta-clean"
@@ -321,6 +513,8 @@ export default function WebsiteFormsView({ currentUser }) {
         ) : (
           <div className="meta-forms-table">
             {forms.map((form) => {
+              const currentPipeline = pipelines.find((p) => p.id === form.pipeline_id);
+
               return (
                 <div key={form.id || form.form_id} className="meta-form-row-item">
                   <div className="meta-form-identity">
@@ -328,8 +522,14 @@ export default function WebsiteFormsView({ currentUser }) {
                       <Globe size={16} color="#475569" />
                     </div>
                     <div className="meta-form-info-col">
-                      <span className="meta-form-title">{form.form_name}</span>
-                      <div className="meta-form-meta-row">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span className="meta-form-title">{form.form_name}</span>
+                        <code style={{ fontSize: '10.5px', color: '#64748b', background: '#f1f5f9', padding: '1px 5px', borderRadius: '4px' }}>
+                          {form.form_id}
+                        </code>
+                      </div>
+
+                      <div className="meta-form-meta-row" style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                         {(() => {
                           const sites = Array.isArray(form.connected_sites) && form.connected_sites.length > 0
                             ? form.connected_sites
@@ -364,6 +564,24 @@ export default function WebsiteFormsView({ currentUser }) {
                             </span>
                           );
                         })()}
+
+                        {/* Pipeline Routing Selector */}
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                          <GitBranch size={12} color="#64748b" />
+                          <select
+                            className="wf-pipe-select"
+                            value={form.pipeline_id || ''}
+                            onChange={(e) => handleUpdateFormPipeline(form.id, e.target.value)}
+                            title="Target Pipeline for incoming leads"
+                          >
+                            <option value="" disabled>Select Pipeline...</option>
+                            {pipelines.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -374,13 +592,15 @@ export default function WebsiteFormsView({ currentUser }) {
                       className="btn-meta-clean"
                       onClick={() => {
                         setSelectedScriptForm(form);
+                        setScriptTab('passive');
                         setScriptCopied(false);
+                        setTestResult(null);
                       }}
-                      title="Get universal integration script"
+                      title="Get integration code & webhook specs"
                       style={{ height: '30px', padding: '0 10px', fontSize: '11.5px', gap: '6px' }}
                     >
                       <Code size={13} />
-                      <span>Get Script</span>
+                      <span>Integration Code</span>
                     </button>
 
                     <button
@@ -434,10 +654,10 @@ export default function WebsiteFormsView({ currentUser }) {
               <span className="pipeline-number-index" style={{ lineHeight: 1.15, flexShrink: 0 }}>1</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <span style={{ fontSize: '15px', fontWeight: 500, color: '#0f172a', lineHeight: 1.3 }}>
-                  Create a Dedicated Pipeline
+                  Assign to a Pipeline
                 </span>
                 <span style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.55 }}>
-                  Go to <strong>Pipelines</strong> and create a new pipeline for this campaign (e.g. <em>Website Inquiries</em>). Select this form under <strong>Lead Source</strong> so incoming leads route to their own stages and custom team distribution.
+                  Choose which pipeline incoming leads should route to. You can switch pipelines at any time from the dropdown in the forms table above.
                 </span>
               </div>
             </div>
@@ -446,10 +666,10 @@ export default function WebsiteFormsView({ currentUser }) {
               <span className="pipeline-number-index" style={{ lineHeight: 1.15, flexShrink: 0 }}>2</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <span style={{ fontSize: '15px', fontWeight: 500, color: '#0f172a', lineHeight: 1.3 }}>
-                  Copy the Script
+                  Choose Integration Method
                 </span>
                 <span style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.55 }}>
-                  Click <strong>Get Script</strong> on your form above and copy the generated JavaScript code.
+                  Use the <strong>Passive Web Script</strong> for HTML / Webflow / WordPress sites (it transparently intercepts form submits without altering checkout flows). For React, Next.js, and custom checkout flows, use the <strong>Server-Side Webhook</strong>.
                 </span>
               </div>
             </div>
@@ -458,10 +678,10 @@ export default function WebsiteFormsView({ currentUser }) {
               <span className="pipeline-number-index" style={{ lineHeight: 1.15, flexShrink: 0 }}>3</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <span style={{ fontSize: '15px', fontWeight: 500, color: '#0f172a', lineHeight: 1.3 }}>
-                  Embed into Website
+                  Pre-Payment / Checkout Lead Capture
                 </span>
                 <span style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.55 }}>
-                  Paste the snippet into your website footer or custom HTML block before the closing <code className="meta-code-inline">&lt;/body&gt;</code> tag.
+                  To capture leads even if customers abandon before paying, forward the contact details inside your backend checkout handler or use the <strong>Drop-Off Capture</strong> snippet.
                 </span>
               </div>
             </div>
@@ -470,10 +690,10 @@ export default function WebsiteFormsView({ currentUser }) {
               <span className="pipeline-number-index" style={{ lineHeight: 1.15, flexShrink: 0 }}>4</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <span style={{ fontSize: '15px', fontWeight: 500, color: '#0f172a', lineHeight: 1.3 }}>
-                  Set Form ID & Field Names
+                  Automatic Ad & Field Attribution
                 </span>
                 <span style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.55 }}>
-                  Ensure your <code className="meta-code-inline">&lt;form&gt;</code> ID matches <code className="meta-code-inline">YOUR_FORM_ID</code> and inputs have standard name attributes (<code className="meta-code-inline">name</code>, <code className="meta-code-inline">phone</code>, <code className="meta-code-inline">email</code>, <code className="meta-code-inline">city</code>, <code className="meta-code-inline">message</code>). Additional fields are captured automatically as custom fields.
+                  Standard inputs (<code className="meta-code-inline">name</code>, <code className="meta-code-inline">email</code>, <code className="meta-code-inline">phone</code>, <code className="meta-code-inline">city</code>) map to primary lead fields. UTM parameters (<code className="meta-code-inline">utm_source</code>, <code className="meta-code-inline">utm_campaign</code>) and custom inputs are saved automatically as custom fields.
                 </span>
               </div>
             </div>
@@ -481,16 +701,15 @@ export default function WebsiteFormsView({ currentUser }) {
         )}
       </div>
 
-
-      {/* Universal Script Modal */}
+      {/* Integration Code Modal */}
       {selectedScriptForm && createPortal(
         <div className="meta-modal-backdrop" onClick={() => setSelectedScriptForm(null)}>
-          <div className="meta-modal" style={{ maxWidth: '660px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="meta-modal" style={{ maxWidth: '720px' }} onClick={(e) => e.stopPropagation()}>
             <div className="meta-modal-header">
               <div>
-                <h3 className="meta-modal-title">Universal Integration Script</h3>
+                <h3 className="meta-modal-title">Website Form Integration Hub</h3>
                 <p className="meta-modal-subtitle" style={{ marginTop: '2px', fontSize: '12px', color: '#64748b' }}>
-                  {selectedScriptForm.form_name}
+                  {selectedScriptForm.form_name} &middot; <code style={{ fontSize: '11px' }}>{selectedScriptForm.form_id}</code>
                 </p>
               </div>
               <button
@@ -504,17 +723,97 @@ export default function WebsiteFormsView({ currentUser }) {
             </div>
 
             <div className="meta-modal-body" style={{ padding: '20px' }}>
-              <p style={{ margin: '0 0 12px 0', fontSize: '12.5px', color: '#64748b', lineHeight: 1.5 }}>
-                Paste this script into your site's custom code or footer before the closing <code className="meta-code-inline">&lt;/body&gt;</code> tag. Replace <code className="meta-code-inline">YOUR_FORM_ID</code> with your form’s ID attribute.
-              </p>
+              {/* Simulator & Ingestion Test Banner */}
+              <div className={`wf-test-banner ${testResult ? (testResult.success ? 'success' : 'error') : ''}`}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ShieldCheck size={16} color={testResult?.success ? '#16a34a' : '#64748b'} />
+                  <span>
+                    {testResult ? testResult.message : 'Verify your webhook endpoint by sending a test lead payload.'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn-meta-clean"
+                  onClick={() => handleSendTestLead(selectedScriptForm)}
+                  disabled={isTestingLead}
+                  style={{ height: '28px', padding: '0 10px', fontSize: '11.5px', gap: '5px' }}
+                >
+                  <Send size={12} />
+                  <span>{isTestingLead ? 'Sending...' : 'Send Test Lead'}</span>
+                </button>
+              </div>
 
+              {/* Segmented Tab Bar */}
+              <div className="wf-tab-bar">
+                <button
+                  type="button"
+                  className={`wf-tab-btn ${scriptTab === 'passive' ? 'active' : ''}`}
+                  onClick={() => setScriptTab('passive')}
+                >
+                  <Globe size={13} />
+                  <span>Passive Script (HTML/Webflow)</span>
+                </button>
+                <button
+                  type="button"
+                  className={`wf-tab-btn ${scriptTab === 'server' ? 'active' : ''}`}
+                  onClick={() => setScriptTab('server')}
+                >
+                  <Server size={13} />
+                  <span>Server-Side (React / Checkout)</span>
+                </button>
+                <button
+                  type="button"
+                  className={`wf-tab-btn ${scriptTab === 'abandonment' ? 'active' : ''}`}
+                  onClick={() => setScriptTab('abandonment')}
+                >
+                  <Zap size={13} />
+                  <span>Drop-Off Capture</span>
+                </button>
+                <button
+                  type="button"
+                  className={`wf-tab-btn ${scriptTab === 'curl' ? 'active' : ''}`}
+                  onClick={() => setScriptTab('curl')}
+                >
+                  <Terminal size={13} />
+                  <span>cURL</span>
+                </button>
+              </div>
+
+              {/* Tab Explanations */}
+              {scriptTab === 'passive' && (
+                <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
+                  <strong>Zero-Interruption Interceptor:</strong> Paste this into your site header or footer before <code className="meta-code-inline">&lt;/body&gt;</code>. It silently captures all submissions and UTM tags using <code className="meta-code-inline">sendBeacon</code> without stopping form redirects or payment.
+                </p>
+              )}
+              {scriptTab === 'server' && (
+                <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
+                  <strong>100% Ad-Blocker Proof:</strong> Call this from your backend server function (e.g. Next.js, Node.js, Python, or enrollment checkout handler) before opening payment. Guarantees lead capture even if visitors use Brave or uBlock.
+                </p>
+              )}
+              {scriptTab === 'abandonment' && (
+                <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
+                  <strong>Pre-Payment Abandonment Capture:</strong> Listens for <code className="meta-code-inline">change</code> events on email and phone fields. If a visitor types their contact info and drops off without completing payment, your CRM still receives their lead.
+                </p>
+              )}
+              {scriptTab === 'curl' && (
+                <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
+                  <strong>Direct HTTP Testing:</strong> Use this cURL command in your terminal to test webhook ingestion and custom field mapping.
+                </p>
+              )}
+
+              {/* Code Box */}
               <div className="meta-script-preview-box">
                 <div className="meta-script-preview-bar">
                   <div className="meta-script-dots">
                     <span className="meta-script-dot red" />
                     <span className="meta-script-dot yellow" />
                     <span className="meta-script-dot green" />
-                    <span className="meta-script-filename">universal-form.html</span>
+                    <span className="meta-script-filename">
+                      {scriptTab === 'passive' && 'passive-interceptor.html'}
+                      {scriptTab === 'server' && 'crm-forwarder.ts'}
+                      {scriptTab === 'abandonment' && 'dropoff-capture.html'}
+                      {scriptTab === 'curl' && 'test-webhook.sh'}
+                    </span>
                   </div>
                   <button
                     type="button"
@@ -537,34 +836,7 @@ export default function WebsiteFormsView({ currentUser }) {
 
                 <div className="meta-script-code-wrap">
                   <pre className="meta-script-code">
-                    <span className="syn-tag">&lt;script&gt;</span>{'\n'}
-                    (<span className="syn-kw">function</span>() &#123;{'\n'}
-                    {'  '}<span className="syn-kw">const</span> <span className="syn-var">endpoint</span> = <span className="syn-str">'{supabaseUrl}/functions/v1/website-webhook?form_id={selectedScriptForm.form_id}'</span>;{'\n'}
-                    {'\n'}
-                    {'  '}<span className="syn-punct">// Verify connection on load</span>{'\n'}
-                    {'  '}<span className="syn-fn">fetch</span>(<span className="syn-var">endpoint</span> + <span className="syn-str">'&ping=true'</span>, &#123;{'\n'}
-                    {'    '}<span className="syn-prop">method</span>: <span className="syn-str">'POST'</span>,{'\n'}
-                    {'    '}<span className="syn-prop">headers</span>: &#123; <span className="syn-str">'Content-Type'</span>: <span className="syn-str">'application/json'</span> &#125;,{'\n'}
-                    {'    '}<span className="syn-prop">body</span>: <span className="syn-obj">JSON</span>.<span className="syn-fn">stringify</span>(&#123; <span className="syn-prop">site_domain</span>: <span className="syn-obj">window</span>.<span className="syn-obj">location</span>.<span className="syn-var">hostname</span> &#125;){'\n'}
-                    {'  '}&#125;).<span className="syn-fn">catch</span>(<span className="syn-kw">function</span>() &#123;&#125;);{'\n'}
-                    {'\n'}
-                    {'  '}<span className="syn-punct">// Form submission handler</span>{'\n'}
-                    {'  '}<span className="syn-obj">document</span>.<span className="syn-fn">getElementById</span>(<span className="syn-str">'YOUR_FORM_ID'</span>).<span className="syn-fn">addEventListener</span>(<span className="syn-str">'submit'</span>, <span className="syn-kw">async function</span>(e) &#123;{'\n'}
-                    {'    '}e.<span className="syn-fn">preventDefault</span>();{'\n'}
-                    {'    '}<span className="syn-kw">const</span> <span className="syn-var">data</span> = <span className="syn-obj">Object</span>.<span className="syn-fn">fromEntries</span>(<span className="syn-kw">new</span> <span className="syn-obj">FormData</span>(<span className="syn-obj">this</span>).<span className="syn-fn">entries</span>());{'\n'}
-                    {'    '}<span className="syn-var">data</span>.<span className="syn-var">site_domain</span> = <span className="syn-obj">window</span>.<span className="syn-obj">location</span>.<span className="syn-var">hostname</span>;{'\n'}
-                    {'\n'}
-                    {'    '}<span className="syn-kw">await</span> <span className="syn-fn">fetch</span>(<span className="syn-var">endpoint</span>, &#123;{'\n'}
-                    {'      '}<span className="syn-prop">method</span>: <span className="syn-str">'POST'</span>,{'\n'}
-                    {'      '}<span className="syn-prop">headers</span>: &#123; <span className="syn-str">'Content-Type'</span>: <span className="syn-str">'application/json'</span> &#125;,{'\n'}
-                    {'      '}<span className="syn-prop">body</span>: <span className="syn-obj">JSON</span>.<span className="syn-fn">stringify</span>(<span className="syn-var">data</span>){'\n'}
-                    {'    '}&#125;);{'\n'}
-                    {'\n'}
-                    {'    '}<span className="syn-fn">alert</span>(<span className="syn-str">'Thank you! Your inquiry has been received.'</span>);{'\n'}
-                    {'    '}<span className="syn-obj">this</span>.<span className="syn-fn">reset</span>();{'\n'}
-                    {'  '}&#125;);{'\n'}
-                    &#125;)();{'\n'}
-                    <span className="syn-tag">&lt;/script&gt;</span>
+                    {getActiveCode(selectedScriptForm.form_id)}
                   </pre>
                 </div>
               </div>
@@ -583,7 +855,7 @@ export default function WebsiteFormsView({ currentUser }) {
                 className="btn-meta-primary"
                 onClick={handleCopyScript}
               >
-                {scriptCopied ? 'Copied to Clipboard' : 'Copy Script'}
+                {scriptCopied ? 'Copied to Clipboard' : 'Copy Code'}
               </button>
             </div>
           </div>
@@ -610,27 +882,64 @@ export default function WebsiteFormsView({ currentUser }) {
             </div>
 
             <form onSubmit={handleCreateForm}>
-              <div className="meta-modal-body" style={{ padding: '20px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
-                  Form Name
-                </label>
-                <input
-                  type="text"
-                  autoFocus
-                  required
-                  className="meta-input-field"
-                  placeholder="e.g. Homepage Contact Form"
-                  value={newFormName}
-                  onChange={(e) => setNewFormName(e.target.value)}
-                  style={{
-                    width: '100%',
-                    height: '38px',
-                    borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    padding: '0 12px',
-                    fontSize: '13px'
-                  }}
-                />
+              <div className="meta-modal-body" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                    Form Name
+                  </label>
+                  <input
+                    type="text"
+                    autoFocus
+                    required
+                    className="meta-input-field"
+                    placeholder="e.g. Checkout Enrolment Form"
+                    value={newFormName}
+                    onChange={(e) => setNewFormName(e.target.value)}
+                    style={{
+                      width: '100%',
+                      height: '38px',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      padding: '0 12px',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                    Route Leads to Pipeline
+                  </label>
+                  <select
+                    value={newFormPipelineId}
+                    onChange={(e) => setNewFormPipelineId(e.target.value)}
+                    style={{
+                      width: '100%',
+                      height: '38px',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      padding: '0 12px',
+                      fontSize: '13px',
+                      boxSizing: 'border-box',
+                      background: '#ffffff',
+                      color: '#0f172a'
+                    }}
+                  >
+                    {pipelines.length === 0 ? (
+                      <option value="">Default Pipeline</option>
+                    ) : (
+                      pipelines.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#64748b' }}>
+                    Incoming submissions will automatically appear in this pipeline's entry stage.
+                  </p>
+                </div>
               </div>
 
               <div className="meta-modal-footer">

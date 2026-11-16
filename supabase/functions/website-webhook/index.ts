@@ -165,21 +165,45 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Workspace subscription is inactive." }, 403);
       }
 
-      // Check if Form is linked to a Pipeline belonging to the same company
-      if (!connectedForm.pipeline_id) {
+      // Check if Form is linked to a Pipeline belonging to the same company, or fallback to default
+      let targetPipelineId = connectedForm.pipeline_id;
+      if (!targetPipelineId) {
+        // Fallback: look up workspace's default or primary pipeline
+        const { data: defaultPipe } = await adminClient
+          .from("pipelines")
+          .select("id")
+          .eq("company_id", companyId)
+          .order("is_default", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (defaultPipe?.id) {
+          targetPipelineId = defaultPipe.id;
+          try {
+            await adminClient
+              .from("connected_forms")
+              .update({ pipeline_id: targetPipelineId })
+              .eq("id", connectedForm.id)
+              .eq("company_id", companyId);
+          } catch {
+            // non-fatal auto-heal
+          }
+        }
+      }
+
+      if (!targetPipelineId) {
         console.warn(
-          `[Website Webhook] Form "${connectedForm.form_name}" (ID: ${formId}) is not linked to any pipeline.`
+          `[Website Webhook] Form "${connectedForm.form_name}" (ID: ${formId}) has no assigned pipeline and no workspace pipeline exists.`
         );
         return jsonResponse(
           {
-            error: `Form '${connectedForm.form_name}' is not attached to any pipeline. Please connect it in Pipeline Settings.`,
+            error: `Form '${connectedForm.form_name}' is not attached to any pipeline. Please create a pipeline first.`,
           },
           400
         );
       }
 
-      const targetPipelineId = connectedForm.pipeline_id;
-      const { data: scopedPipeline } = await adminClient
+      let { data: scopedPipeline } = await adminClient
         .from("pipelines")
         .select("id")
         .eq("id", targetPipelineId)
@@ -187,10 +211,24 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (!scopedPipeline) {
-        return jsonResponse(
-          { error: "Form is linked to a pipeline outside its workspace." },
-          400
-        );
+        // Fallback if pipeline was deleted
+        const { data: fallbackPipe } = await adminClient
+          .from("pipelines")
+          .select("id")
+          .eq("company_id", companyId)
+          .order("is_default", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (fallbackPipe?.id) {
+          targetPipelineId = fallbackPipe.id;
+          scopedPipeline = fallbackPipe;
+        } else {
+          return jsonResponse(
+            { error: "Form is linked to an invalid pipeline." },
+            400
+          );
+        }
       }
 
       const entryStage = connectedForm.entry_stage_id || "new";
