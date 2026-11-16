@@ -23,6 +23,7 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
   const pageRef = useRef(null);
   const ctaRef = useRef(null);
   const [teamSize, setTeamSize] = useState(5);
+  const [seatsInput, setSeatsInput] = useState('5');
   const [openFaq, setOpenFaq] = useState(0);
 
   useScrollReveal(pageRef);
@@ -87,7 +88,7 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
           companyName: leadFormData.companyName.trim() || undefined,
           workEmail: normalizedEmail,
           phone: leadFormData.phone.trim(),
-          requestedSeats: teamSize > 25 ? 26 : teamSize,
+          requestedSeats: teamSize > 25 ? 26 : Math.max(1, teamSize || 5),
           requestedEnterprise: teamSize > 25,
           loginUrl
         }
@@ -352,11 +353,15 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
                             </div>
                             <input
                               type="range"
-                              min={3}
+                              min={1}
                               max={26}
                               step={1}
                               value={teamSize}
-                              onChange={(e) => setTeamSize(Number(e.target.value))}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                setTeamSize(val);
+                                setSeatsInput(val > 25 ? 'Enterprise (25+ seats)' : String(val));
+                              }}
                               className="pricing-range-slider"
                               aria-label="Select Number of Seats"
                             />
@@ -627,29 +632,67 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
                           <div className="pricing-team-size-wrap">
                             <input
                               type="text"
-                              value={teamSize > 25 ? 'Enterprise (25+ seats)' : teamSize}
+                              value={seatsInput}
                               onFocus={(e) => {
-                                if (teamSize > 25) e.target.select();
+                                if (seatsInput.includes('Enterprise') || seatsInput.includes('25+')) {
+                                  e.target.select();
+                                }
                               }}
                               onChange={(e) => {
-                                const raw = e.target.value.trim();
+                                const raw = e.target.value;
+                                // Allow user to backspace and clear the field freely
+                                if (raw === '') {
+                                  setSeatsInput('');
+                                  return;
+                                }
+
                                 if (raw.toLowerCase().includes('ent') || raw.includes('25+')) {
+                                  setSeatsInput('Enterprise (25+ seats)');
                                   setTeamSize(26);
                                   return;
                                 }
-                                const val = parseInt(raw, 10);
-                                if (!isNaN(val) && val >= 1) {
-                                  setTeamSize(val > 25 ? 26 : Math.max(val, 1));
-                                } else if (raw === '') {
-                                  setTeamSize(1);
+
+                                const numeric = raw.replace(/[^0-9]/g, '');
+                                if (numeric === '') {
+                                  setSeatsInput('');
+                                  return;
+                                }
+
+                                const val = parseInt(numeric, 10);
+                                if (val > 25) {
+                                  setSeatsInput('Enterprise (25+ seats)');
+                                  setTeamSize(26);
+                                } else {
+                                  setSeatsInput(String(val));
+                                  setTeamSize(val);
+                                }
+                              }}
+                              onBlur={() => {
+                                if (!seatsInput || seatsInput.trim() === '') {
+                                  const fallback = teamSize && teamSize >= 1 ? teamSize : 5;
+                                  setSeatsInput(fallback > 25 ? 'Enterprise (25+ seats)' : String(fallback));
+                                  setTeamSize(fallback);
+                                } else {
+                                  const numeric = seatsInput.replace(/[^0-9]/g, '');
+                                  const val = parseInt(numeric, 10);
+                                  if (isNaN(val) || val < 1) {
+                                    setSeatsInput('1');
+                                    setTeamSize(1);
+                                  } else if (val > 25) {
+                                    setSeatsInput('Enterprise (25+ seats)');
+                                    setTeamSize(26);
+                                  } else {
+                                    setSeatsInput(String(val));
+                                    setTeamSize(val);
+                                  }
                                 }
                               }}
                               className="pricing-team-size-input"
                               placeholder="e.g. 5"
                             />
-                            {teamSize <= 25 && (
+                            {seatsInput !== '' && !seatsInput.includes('Enterprise') && (
                               <span className="pricing-team-size-suffix">
-                                seats
+                                {seatsInput === '1' ? 'seat' : 'seats'}
                               </span>
                             )}
                           </div>
