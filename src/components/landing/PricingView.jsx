@@ -82,6 +82,18 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
           ? `${window.location.origin}/login`
           : 'https://simplecrm.capoasis.com/login';
 
+      // Capture UTM parameters from URL for ad attribution
+      const utmObj = {};
+      try {
+        if (typeof window !== 'undefined' && window.location?.search) {
+          const searchParams = new URLSearchParams(window.location.search);
+          ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'].forEach((k) => {
+            const val = searchParams.get(k);
+            if (val) utmObj[k] = val;
+          });
+        }
+      } catch {}
+
       const { data, error } = await supabase.functions.invoke('enroll-trial', {
         body: {
           name: leadFormData.name.trim(),
@@ -90,7 +102,8 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
           phone: leadFormData.phone.trim(),
           requestedSeats: teamSize > 25 ? 26 : Math.max(1, teamSize || 5),
           requestedEnterprise: teamSize > 25,
-          loginUrl
+          loginUrl,
+          utmParams: Object.keys(utmObj).length > 0 ? utmObj : undefined
         }
       });
 
@@ -109,6 +122,17 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
         }
         return;
       }
+
+      // Fire Meta Pixel event if configured
+      try {
+        if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
+          window.fbq('track', 'CompleteRegistration', {
+            content_name: '14-Day Free Trial',
+            currency: 'INR',
+            value: 0
+          });
+        }
+      } catch {}
 
       setTrialResult({
         provisioned: Boolean(result.provisioned),

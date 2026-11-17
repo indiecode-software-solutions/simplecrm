@@ -104,6 +104,18 @@ Deno.serve(async (req) => {
       );
     }
 
+    const utmParams = body.utmParams && typeof body.utmParams === "object" ? body.utmParams : null;
+    let enrollmentNotes = requestedEnterprise ? "Enterprise (25+ seats) inquiry" : null;
+    if (utmParams) {
+      const utmStr = Object.entries(utmParams)
+        .filter(([_, v]) => Boolean(v))
+        .map(([k, v]) => `${k}=${v}`)
+        .join(" | ");
+      if (utmStr) {
+        enrollmentNotes = enrollmentNotes ? `${enrollmentNotes} · UTM: ${utmStr}` : `UTM: ${utmStr}`;
+      }
+    }
+
     const { data: enrollment, error: enrollErr } = await adminClient
       .from("trial_enrollments")
       .insert([{
@@ -113,7 +125,7 @@ Deno.serve(async (req) => {
         phone,
         requested_seats: requestedSeats,
         status: "pending",
-        notes: requestedEnterprise ? "Enterprise (25+ seats) inquiry" : null,
+        notes: enrollmentNotes,
       }])
       .select("id, full_name, company_name, work_email, requested_seats, status, created_at")
       .single();

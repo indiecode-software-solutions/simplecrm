@@ -234,8 +234,15 @@ export default function App() {
     );
   }
 
-  // 1.5. Pricing Page
-  if (currentPath === '/pricing' || currentPath === '/pricing/') {
+  // 1.5. Pricing & Free Trial Enrollment Page
+  if (
+    currentPath === '/pricing' ||
+    currentPath === '/pricing/' ||
+    currentPath === '/trial' ||
+    currentPath === '/trial/' ||
+    currentPath === '/free-trial' ||
+    currentPath === '/free-trial/'
+  ) {
     if (isPortalMode) {
       if (currentUser) {
         return (
