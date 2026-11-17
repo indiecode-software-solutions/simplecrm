@@ -51,3 +51,4 @@ BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.website_pixel_events;
   END IF;
 END $$;
+

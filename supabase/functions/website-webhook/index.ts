@@ -306,19 +306,184 @@ Deno.serve(async (req) => {
       const now = new Date();
       const nowIso = now.toISOString();
       const dateStr = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()}`;
+      const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+
+      const finalName = String(leadName).trim();
+      const finalPhone = String(leadPhone).trim();
+      const finalEmail = String(leadEmail).trim();
+      const finalCity = String(leadCity).trim();
+      const finalNotes = String(leadNotes).trim();
+
+      // Duplicate Guard (No time limit): match existing lead within this company by email or phone digits
+      const cleanEmail = finalEmail.toLowerCase();
+      const cleanPhoneDigits = finalPhone.replace(/\D/g, "");
+      const last10Phone =
+        cleanPhoneDigits.length >= 10
+          ? cleanPhoneDigits.slice(-10)
+          : cleanPhoneDigits.length >= 7
+            ? cleanPhoneDigits
+            : "";
+
+      let existingLead: Record<string, any> | null = null;
+
+      if (cleanEmail) {
+        const { data: leadByEmail } = await adminClient
+          .from("leads")
+          .select("*")
+          .eq("company_id", companyId)
+          .ilike("email", cleanEmail)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (leadByEmail) {
+          existingLead = leadByEmail;
+        }
+      }
+
+      if (!existingLead && last10Phone) {
+        const { data: leadByPhone } = await adminClient
+          .from("leads")
+          .select("*")
+          .eq("company_id", companyId)
+          .ilike("phone", `%${last10Phone}`)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (leadByPhone) {
+          existingLead = leadByPhone;
+        }
+      }
+
+      if (existingLead) {
+        // APPEND / UPDATE EXISTING LEAD INSTEAD OF CREATING DUPLICATE
+        const prevCustom =
+          existingLead.custom_fields && typeof existingLead.custom_fields === "object"
+            ? existingLead.custom_fields
+            : {};
+        const prevHistory = Array.isArray(prevCustom.submissions_history)
+          ? prevCustom.submissions_history
+          : [];
+        const submissionCount = (Number(prevCustom.submission_count) || 1) + 1;
+
+        const newSubmissionRecord = {
+          timestamp: nowIso,
+          form_id: connectedForm.form_id || String(formId),
+          form_name: connectedForm.form_name || "Website Form",
+          site_domain: siteDomain || null,
+          notes: finalNotes || null,
+          utm_source: customFields.utm_source || null,
+          utm_medium: customFields.utm_medium || null,
+          utm_campaign: customFields.utm_campaign || null,
+          utm_content: customFields.utm_content || null,
+          utm_term: customFields.utm_term || null,
+        };
+
+        const mergedCustomFields = {
+          ...prevCustom,
+          ...customFields,
+          submission_count: submissionCount,
+          last_submitted_at: nowIso,
+          submissions_history: [...prevHistory, newSubmissionRecord].slice(-25),
+        };
+
+        const resolvedName =
+          (!existingLead.name ||
+            existingLead.name === "Website Lead" ||
+            existingLead.name === "Unknown") &&
+          finalName &&
+          finalName !== "Website Lead"
+            ? finalName
+            : existingLead.name || finalName;
+
+        const updatePayload: Record<string, any> = {
+          name: resolvedName,
+          custom_fields: mergedCustomFields,
+          form_id: connectedForm.form_id || String(formId),
+          form_name: connectedForm.form_name || "Website Form",
+        };
+
+        if (!existingLead.email && finalEmail) updatePayload.email = finalEmail;
+        if (!existingLead.phone && finalPhone) updatePayload.phone = finalPhone;
+        if (!existingLead.city && finalCity) updatePayload.city = finalCity;
+
+        if (finalNotes) {
+          updatePayload.notes = existingLead.notes
+            ? `${existingLead.notes}\n[${dateStr} ${timeStr} Re-submission]: ${finalNotes}`
+            : finalNotes;
+        }
+
+        const { data: updatedLead, error: updateError } = await adminClient
+          .from("leads")
+          .update(updatePayload)
+          .eq("id", existingLead.id)
+          .select()
+          .single();
+
+        if (updateError) {
+          console.error("[Website Webhook] Failed to update duplicate lead:", updateError);
+          return jsonResponse({ error: "Failed to update lead: " + updateError.message }, 500);
+        }
+
+        // Record activity log for the lead timeline
+        try {
+          await adminClient.from("lead_activities").insert({
+            company_id: companyId,
+            lead_id: existingLead.id,
+            lead_name: resolvedName || "Website Lead",
+            type: "form_resubmitted",
+            details: `Re-submitted website form "${connectedForm.form_name || "Website Form"}" (#${submissionCount})${siteDomain ? " on " + siteDomain : ""}${finalNotes ? ": " + finalNotes : ""}`,
+            user_name: "Website Form Interceptor",
+          });
+        } catch (actErr) {
+          console.warn("[Website Webhook] Non-critical activity log error:", actErr);
+        }
+
+        console.log(
+          `[Website Webhook] Consolidated duplicate submission into lead ${existingLead.id} for company=${companyId} ("${resolvedName}", submissions=${submissionCount})`
+        );
+
+        return jsonResponse({
+          success: true,
+          message: "Existing lead updated with new form submission.",
+          lead_id: existingLead.id,
+          is_duplicate: true,
+        });
+      }
+
+      // NEW LEAD INSERTION
       const leadPayload = {
         company_id: companyId,
-        name: String(leadName).trim(),
-        phone: String(leadPhone).trim(),
-        email: String(leadEmail).trim(),
-        city: String(leadCity).trim(),
+        name: finalName,
+        phone: finalPhone,
+        email: finalEmail,
+        city: finalCity,
         stage: entryStage,
         pipeline_id: targetPipelineId,
         assigned_to: assignedTo,
         form_id: connectedForm.form_id || String(formId),
         form_name: connectedForm.form_name || "Website Form",
-        notes: String(leadNotes).trim(),
-        custom_fields: customFields,
+        notes: finalNotes,
+        custom_fields: {
+          ...customFields,
+          submission_count: 1,
+          last_submitted_at: nowIso,
+          submissions_history: [
+            {
+              timestamp: nowIso,
+              form_id: connectedForm.form_id || String(formId),
+              form_name: connectedForm.form_name || "Website Form",
+              site_domain: siteDomain || null,
+              notes: finalNotes || null,
+              utm_source: customFields.utm_source || null,
+              utm_medium: customFields.utm_medium || null,
+              utm_campaign: customFields.utm_campaign || null,
+              utm_content: customFields.utm_content || null,
+              utm_term: customFields.utm_term || null,
+            },
+          ],
+        },
         date: dateStr,
         created_at: nowIso,
       };
