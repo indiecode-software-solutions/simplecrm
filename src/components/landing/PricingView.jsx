@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   CheckCircle2,
   ChevronDown,
@@ -28,6 +28,45 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
 
   useScrollReveal(pageRef);
   useSpotlightSurface(ctaRef);
+
+  // Detect URL hash on page load (e.g. /pricing#trial-form) and smoothly scroll after render
+  useEffect(() => {
+    const scrollToHashTarget = () => {
+      if (typeof window === 'undefined' || !window.location.hash) return;
+      const targetId = window.location.hash.replace(/^#/, '');
+      if (!targetId) return;
+      const el = document.getElementById(targetId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (targetId === 'trial-form') {
+          const firstInput = el.querySelector('input');
+          if (firstInput) {
+            firstInput.focus({ preventScroll: true });
+          }
+        }
+      }
+    };
+
+    let rafId1 = 0;
+    let rafId2 = 0;
+    let timerId = 0;
+
+    if (typeof window !== 'undefined' && window.location.hash) {
+      rafId1 = window.requestAnimationFrame(() => {
+        rafId2 = window.requestAnimationFrame(() => {
+          timerId = window.setTimeout(scrollToHashTarget, 60);
+        });
+      });
+    }
+
+    window.addEventListener('hashchange', scrollToHashTarget);
+    return () => {
+      if (rafId1) window.cancelAnimationFrame(rafId1);
+      if (rafId2) window.cancelAnimationFrame(rafId2);
+      if (timerId) window.clearTimeout(timerId);
+      window.removeEventListener('hashchange', scrollToHashTarget);
+    };
+  }, []);
 
   // Lead Form State
   const [leadFormData, setLeadFormData] = useState({
@@ -419,7 +458,7 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
                                 type="button"
                                 className="pricing-contact-sales-btn"
                                 onClick={() => {
-                                  const el = document.getElementById('pricing-lead-form-section');
+                                  const el = document.getElementById('trial-form');
                                   if (el) {
                                     el.scrollIntoView({ behavior: 'smooth' });
                                     const nameInput = el.querySelector('input');
@@ -454,7 +493,7 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
               </div>
 
               {/* Standalone Lead Form Section */}
-              <div id="pricing-lead-form-section" className="pricing-lead-form-card" data-scroll-reveal="form-card">
+              <div id="trial-form" className="pricing-lead-form-card" data-scroll-reveal="form-card">
                 <div className="pricing-lead-form-wrap">
                   {leadSubmitted ? (
                     <div className="pricing-lead-success-card">
@@ -834,7 +873,7 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
             <button
               type="button"
               onClick={() => {
-                const el = document.getElementById('pricing-lead-form-section');
+                const el = document.getElementById('trial-form');
                 if (el) {
                   el.scrollIntoView({ behavior: 'smooth' });
                   const nameInput = el.querySelector('input');

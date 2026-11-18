@@ -61,11 +61,17 @@ export default function App() {
     }
   });
 
-  const navigateTo = (path) => {
-    if (window.location.pathname !== path) {
-      window.history.pushState({}, '', path);
+  const navigateTo = (targetUrl) => {
+    const [rawPath, hashPart] = String(targetUrl || '/').split('#');
+    const pathnameOnly = rawPath.split('?')[0] || '/';
+    const currentFull = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (currentFull !== targetUrl) {
+      window.history.pushState({}, '', targetUrl);
     }
-    setCurrentPath(path);
+    setCurrentPath(pathnameOnly);
+    if (!hashPart) {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
   };
 
   useEffect(() => {
@@ -306,6 +312,7 @@ export default function App() {
           onGoToDashboard={() => navigateTo('/dashboard')}
           onGoToDownload={() => navigateTo('/download')}
           onGoToPricing={() => navigateTo('/pricing')}
+          onGoToTrial={() => navigateTo('/pricing#trial-form')}
           onGoToLogin={() => navigateTo('/dashboard')}
         />
       );
@@ -392,6 +399,7 @@ export default function App() {
       onGoToLogin={() => navigateTo('/login')}
       onGoToDownload={() => navigateTo('/download')}
       onGoToPricing={() => navigateTo('/pricing')}
+      onGoToTrial={() => navigateTo('/pricing#trial-form')}
       onGoToDashboard={() => navigateTo('/dashboard')}
     />
   );

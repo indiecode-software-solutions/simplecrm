@@ -10,7 +10,7 @@ import '../../styles/landing.css';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
-export default function LandingView({ onGoToLogin, onGoToDownload, currentUser, onGoToDashboard, onGoToPricing }) {
+export default function LandingView({ onGoToLogin, onGoToDownload, currentUser, onGoToDashboard, onGoToPricing, onGoToTrial }) {
   const pageRef = useRef(null);
   const ctaRef = useRef(null);
 
@@ -105,7 +105,7 @@ export default function LandingView({ onGoToLogin, onGoToDownload, currentUser, 
               <button
                 type="button"
                 className="hero-cta-pill"
-                onClick={currentUser ? onGoToDashboard : (onGoToPricing || onGoToLogin)}
+                onClick={currentUser ? onGoToDashboard : (onGoToTrial || onGoToPricing || onGoToLogin)}
               >
                 <span>{currentUser ? 'Go to your CRM' : 'Start 14-day free trial'}</span>
                 <span className="hero-cta-arrow">
@@ -145,7 +145,7 @@ export default function LandingView({ onGoToLogin, onGoToDownload, currentUser, 
             <button
               type="button"
               className="cta-btn-white"
-              onClick={currentUser ? onGoToDashboard : (onGoToPricing || onGoToLogin)}
+              onClick={currentUser ? onGoToDashboard : (onGoToTrial || onGoToPricing || onGoToLogin)}
             >
               {currentUser ? 'Open simplecrm Dashboard' : 'Start 14-day free trial'} &rarr;
             </button>
