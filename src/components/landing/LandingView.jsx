@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import ConversionJourney from './ConversionJourney';
 import { useScrollReveal, useSpotlightSurface } from '../../hooks/useKineticMotion';
+import { trackPricingClick, trackStartTrialClick } from '../../lib/metaPixel';
 import '../../styles/kinetic-motion.css';
 import '../../styles/landing.css';
 
@@ -56,7 +57,10 @@ export default function LandingView({ onGoToLogin, onGoToDownload, currentUser, 
               <button
                 type="button"
                 className="landing-pill-btn-pricing"
-                onClick={onGoToPricing}
+                onClick={() => {
+                  trackPricingClick({ source: 'landing_header' });
+                  if (onGoToPricing) onGoToPricing();
+                }}
               >
                 Pricing
               </button>
@@ -105,7 +109,15 @@ export default function LandingView({ onGoToLogin, onGoToDownload, currentUser, 
               <button
                 type="button"
                 className="hero-cta-pill"
-                onClick={currentUser ? onGoToDashboard : (onGoToTrial || onGoToPricing || onGoToLogin)}
+                onClick={() => {
+                  if (currentUser) {
+                    if (onGoToDashboard) onGoToDashboard();
+                    return;
+                  }
+                  trackStartTrialClick({ source: 'landing_hero' });
+                  const go = onGoToTrial || onGoToPricing || onGoToLogin;
+                  if (go) go();
+                }}
               >
                 <span>{currentUser ? 'Go to your CRM' : 'Start 14-day free trial'}</span>
                 <span className="hero-cta-arrow">
@@ -145,7 +157,15 @@ export default function LandingView({ onGoToLogin, onGoToDownload, currentUser, 
             <button
               type="button"
               className="cta-btn-white"
-              onClick={currentUser ? onGoToDashboard : (onGoToTrial || onGoToPricing || onGoToLogin)}
+              onClick={() => {
+                if (currentUser) {
+                  if (onGoToDashboard) onGoToDashboard();
+                  return;
+                }
+                trackStartTrialClick({ source: 'landing_bottom_cta' });
+                const go = onGoToTrial || onGoToPricing || onGoToLogin;
+                if (go) go();
+              }}
             >
               {currentUser ? 'Open simplecrm Dashboard' : 'Start 14-day free trial'} &rarr;
             </button>

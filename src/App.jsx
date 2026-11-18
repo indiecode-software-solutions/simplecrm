@@ -15,6 +15,7 @@ import { getActiveCompany } from './lib/tenant';
 import { isCompanyAccessLocked } from './lib/billing';
 import { canUserManageBilling } from './lib/permissions';
 import { isDirectPortalDomain } from './lib/domainRouting';
+import { initMetaPixel, trackPageView } from './lib/metaPixel';
 
 const SESSION_STORAGE_KEY = 'simplecrm_user_session';
 
@@ -81,6 +82,13 @@ export default function App() {
     window.addEventListener('popstate', handleLocationChange);
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
+
+  // Initialize Meta Pixel (VITE_META_PIXEL_ID) and track SPA PageView transitions
+  useEffect(() => {
+    if (isNativeApp) return;
+    initMetaPixel();
+    trackPageView(currentPath);
+  }, [currentPath, isNativeApp]);
 
   const handleLoginSuccess = (user, authMeta = {}) => {
     const nextCompany = authMeta.company || (user?.company_id ? { id: user.company_id } : null);

@@ -14,6 +14,12 @@ import {
 import { supabase } from '../../lib/supabase';
 import { parseEdgeFunctionResult } from '../../lib/billing';
 import { useScrollReveal, useSpotlightSurface } from '../../hooks/useKineticMotion';
+import {
+  trackStartTrialClick,
+  trackFormStart,
+  trackCompleteRegistration,
+  trackTrialActivated
+} from '../../lib/metaPixel';
 import '../../styles/kinetic-motion.css';
 import '../../styles/pricing.css';
 
@@ -79,6 +85,18 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
   const [isSubmittingLead, setIsSubmittingLead] = useState(false);
   const [leadSubmitted, setLeadSubmitted] = useState(false);
   const [trialResult, setTrialResult] = useState(null);
+  const hasTrackedFormStartRef = useRef(false);
+
+  const handleFormStart = (e) => {
+    if (hasTrackedFormStartRef.current) return;
+    const tag = e?.target?.tagName;
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') return;
+    hasTrackedFormStartRef.current = true;
+    trackFormStart({
+      form: 'trial_enrollment',
+      field: e.target.name || e.target.placeholder || e.target.type || 'input'
+    });
+  };
 
   const validateEmail = (email) => {
     const trimmed = email.trim().toLowerCase();
@@ -162,16 +180,25 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
         return;
       }
 
-      // Fire Meta Pixel event if configured
-      try {
-        if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
-          window.fbq('track', 'CompleteRegistration', {
-            content_name: '14-Day Free Trial',
-            currency: 'INR',
-            value: 0
-          });
-        }
-      } catch {}
+      // Fire Meta Pixel conversion events
+      const requestedSeatsFinal = teamSize > 25 ? 26 : Math.max(1, teamSize || 5);
+      trackCompleteRegistration({
+        content_name: '14-Day Free Trial',
+        requested_seats: requestedSeatsFinal,
+        is_enterprise: teamSize > 25,
+        currency: 'INR',
+        value: 0
+      });
+
+      if (result.provisioned) {
+        trackTrialActivated({
+          content_name: '14-Day Free Trial Workspace',
+          company_name: result.company?.name || leadFormData.companyName.trim() || undefined,
+          seat_limit: result.company?.seat_limit || requestedSeatsFinal,
+          currency: 'INR',
+          value: 0
+        });
+      }
 
       setTrialResult({
         provisioned: Boolean(result.provisioned),
@@ -458,6 +485,7 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
                                 type="button"
                                 className="pricing-contact-sales-btn"
                                 onClick={() => {
+                                  trackStartTrialClick({ source: 'pricing_enterprise_cta' });
                                   const el = document.getElementById('trial-form');
                                   if (el) {
                                     el.scrollIntoView({ behavior: 'smooth' });
@@ -565,6 +593,7 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
                           onClick={() => {
                             setLeadSubmitted(false);
                             setTrialResult(null);
+                            hasTrackedFormStartRef.current = false;
                             setLeadFormData({ name: '', companyName: '', workEmail: '', phone: '' });
                           }}
                           className="pricing-lead-reset-btn"
@@ -574,7 +603,7 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
                       </div>
                     </div>
                   ) : (
-                    <form onSubmit={handleLeadSubmit}>
+                    <form onSubmit={handleLeadSubmit} onInputCapture={handleFormStart}>
                       <div className="pricing-lead-header">
                         <h4 className="pricing-lead-title">
                           Start your 14-day free trial
@@ -873,6 +902,7 @@ export default function PricingView({ onGoToHome, onGoToLogin }) {
             <button
               type="button"
               onClick={() => {
+                trackStartTrialClick({ source: 'pricing_bottom_cta' });
                 const el = document.getElementById('trial-form');
                 if (el) {
                   el.scrollIntoView({ behavior: 'smooth' });
