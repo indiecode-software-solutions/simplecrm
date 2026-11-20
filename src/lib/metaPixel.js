@@ -123,8 +123,12 @@ export function trackFormStart(params = {}) {
 
 export function trackCompleteRegistration(params = {}) {
   safeFbq('track', 'CompleteRegistration', params);
+  // Also fire standard Lead event for Meta Ad campaign optimization
+  safeFbq('track', 'Lead', params);
 }
 
 export function trackTrialActivated(params = {}) {
   safeFbq('trackCustom', 'TrialActivated', params);
+  // Also fire standard StartTrial event for Meta Ad reporting
+  safeFbq('track', 'StartTrial', params);
 }
