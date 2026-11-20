@@ -11,16 +11,18 @@
  *   - TrialActivated        (Custom: workspace provisioned on enroll-trial)
  */
 
-let pixelInitialized = false;
-let lastTrackedPath = null;
+export const DEFAULT_META_PIXEL_ID = '1445678400486813';
+
+let pixelInitialized = typeof window !== 'undefined' && typeof window.fbq === 'function';
+// Set initial path from index.html initial PageView to prevent double-firing on initial mount
+let lastTrackedPath = typeof window !== 'undefined' ? window.location.pathname : null;
 
 function getMetaPixelId() {
   try {
     const raw = import.meta?.env?.VITE_META_PIXEL_ID;
-    return typeof raw === 'string' ? raw.trim() : '';
-  } catch {
-    return '';
-  }
+    if (typeof raw === 'string' && raw.trim()) return raw.trim();
+  } catch {}
+  return DEFAULT_META_PIXEL_ID;
 }
 
 function isMasterRoute(path) {
