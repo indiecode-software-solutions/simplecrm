@@ -12,10 +12,32 @@
  */
 
 export const DEFAULT_META_PIXEL_ID = '1445678400486813';
+export const DEFAULT_TEST_EVENT_CODE = 'TEST90352';
 
 let pixelInitialized = typeof window !== 'undefined' && typeof window.fbq === 'function';
 // Set initial path from index.html initial PageView to prevent double-firing on initial mount
 let lastTrackedPath = typeof window !== 'undefined' ? window.location.pathname : null;
+
+export function getTestEventCode() {
+  if (typeof window === 'undefined') return '';
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('test_event_code');
+    if (code) {
+      sessionStorage.setItem('meta_test_event_code', code);
+      return code;
+    }
+  } catch {}
+  try {
+    const saved = sessionStorage.getItem('meta_test_event_code');
+    if (saved) return saved;
+  } catch {}
+  try {
+    const envCode = import.meta?.env?.VITE_META_TEST_EVENT_CODE;
+    if (typeof envCode === 'string' && envCode.trim()) return envCode.trim();
+  } catch {}
+  return DEFAULT_TEST_EVENT_CODE;
+}
 
 function getMetaPixelId() {
   try {
@@ -76,7 +98,7 @@ export function initMetaPixel() {
   }
 }
 
-function safeFbq(method, eventName, params) {
+function safeFbq(method, eventName, params = {}) {
   if (typeof window === 'undefined') return;
   if (isMasterRoute()) return;
 
@@ -87,8 +109,20 @@ function safeFbq(method, eventName, params) {
 
   try {
     if (typeof window.fbq !== 'function') return;
-    if (params && Object.keys(params).length > 0) {
-      window.fbq(method, eventName, params);
+
+    const testCode = getTestEventCode();
+    const eventParams = { ...params };
+    const eventOptions = {};
+
+    if (testCode) {
+      eventParams.test_event_code = testCode;
+      eventOptions.test_event_code = testCode;
+    }
+
+    if (Object.keys(eventOptions).length > 0) {
+      window.fbq(method, eventName, eventParams, eventOptions);
+    } else if (Object.keys(eventParams).length > 0) {
+      window.fbq(method, eventName, eventParams);
     } else {
       window.fbq(method, eventName);
     }

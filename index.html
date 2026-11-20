@@ -24,14 +24,23 @@
       s.parentNode.insertBefore(t,s)}(window, document,'script',
       'https://connect.facebook.net/en_US/fbevents.js');
       fbq('init', '1445678400486813');
-      fbq('track', 'PageView');
+      var testCode = 'TEST90352';
+      try {
+        var p = new URLSearchParams(window.location.search).get('test_event_code');
+        if (p) testCode = p;
+      } catch(e) {}
+      if (testCode) {
+        fbq('track', 'PageView', { test_event_code: testCode }, { test_event_code: testCode });
+      } else {
+        fbq('track', 'PageView');
+      }
     </script>
     <!-- End Meta Pixel Code -->
   </head>
   <body>
     <!-- Meta Pixel NoScript Fallback -->
     <noscript><img height="1" width="1" style="display:none"
-      src="https://www.facebook.com/tr?id=1445678400486813&ev=PageView&noscript=1"
+      src="https://www.facebook.com/tr?id=1445678400486813&ev=PageView&test_event_code=TEST90352&noscript=1"
       alt=""
     /></noscript>
     <div id="root"></div>
